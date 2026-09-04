@@ -4,6 +4,7 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { AdminSessionHydrator } from "@/components/admin/session-hydrator"
+import { ReduxProvider } from "@/store/provider"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -56,9 +57,11 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} ${playfair.variable} ${inter.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable} antialiased bg-brand-tertiary text-brand-secondary min-h-screen font-sans`}
       >
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
-          <AdminSessionHydrator />
-          {children}
-          <Toaster />
+          <ReduxProvider>
+            <AdminSessionHydrator />
+            {children}
+            <Toaster />
+          </ReduxProvider>
         </ThemeProvider>
       </body>
     </html>

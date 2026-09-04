@@ -1,39 +1,51 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
-import { Lock, Mail, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react"
-import { useAdminSession, superAdminUser, SUPERADMIN_CREDENTIALS } from "@/lib/admin-session"
+import { Lock, Mail, ArrowRight, ShieldCheck, AlertCircle, Info } from "lucide-react"
+import { useAdminAuth } from "@/hooks/use-admin-auth"
+import { getApiErrorCode, getApiErrorMessage } from "@/lib/api-error"
 import { ROUTES } from "@/lib/routes"
 
+const LOGIN_ERROR_FALLBACKS: Record<string, string> = {
+  ADMIN_AUTH_FAILED: "Invalid email or password.",
+  ADMIN_INACTIVE: "This admin account has been deactivated. Contact a super admin.",
+}
+
 export default function LoginPage() {
-  const login = useAdminSession((s) => s.login)
+  const { login, isLoggingIn } = useAdminAuth()
   const router = useRouter()
-  // Prefilled for easy local sign-in — remove once real auth lands.
-  const [email, setEmail] = useState(SUPERADMIN_CREDENTIALS.email)
-  const [password, setPassword] = useState(SUPERADMIN_CREDENTIALS.password)
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
   const [error, setError] = useState("")
-  const [submitting, setSubmitting] = useState(false)
+  const [expiredNotice, setExpiredNotice] = useState(false)
 
-  // Mock only — there's no real backend/JWT here. Two-factor is password +
-  // OTP: no separate authenticator-app enrollment/recovery-codes ceremony —
-  // every successful login goes straight to OTP verification.
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault()
-
-    const validEmail = email.trim().toLowerCase() === SUPERADMIN_CREDENTIALS.email.toLowerCase()
-    const validPassword = password === SUPERADMIN_CREDENTIALS.password
-
-    if (!validEmail || !validPassword) {
-      setError("Invalid email or password.")
-      return
+  // Reading location.search directly (not next/navigation's useSearchParams)
+  // keeps this page statically renderable — useSearchParams would force a
+  // Suspense boundary just for this one-off notice. /totp/verify and
+  // /totp/enroll land here with ?expired=1 when their 10-minute tempToken
+  // died before the admin finished the OTP step.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("expired") === "1") {
+      setExpiredNotice(true)
     }
+  }, [])
 
+  // Step 1 of admin_auth.json's flow — password only. On success the
+  // backend tells us whether this is a first-ever login (needsEnrollment,
+  // render the TOTP QR) or a returning one (needsTotp, plain code entry).
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault()
     setError("")
-    setSubmitting(true)
-    login(superAdminUser)
-    router.push(ROUTES.totpVerify)
+    setExpiredNotice(false)
+    try {
+      const { needsEnrollment } = await login(email.trim(), password)
+      router.push(needsEnrollment ? ROUTES.totpEnroll : ROUTES.totpVerify)
+    } catch (err) {
+      const code = getApiErrorCode(err)
+      setError(getApiErrorMessage(err) ?? (code && LOGIN_ERROR_FALLBACKS[code]) ?? "Sign-in failed — please try again.")
+    }
   }
 
   return (
@@ -55,6 +67,13 @@ export default function LoginPage() {
           <h1 className="mt-3 font-serif text-2xl font-bold text-brand-secondary">Vexora Admin</h1>
           <p className="mt-1 text-xs uppercase tracking-[0.2em] text-brand-primary-dark">Approve · Verify · Publish</p>
         </div>
+
+        {expiredNotice && (
+          <div className="mb-4 flex items-center gap-2 border border-brand-primary-dark/30 bg-brand-primary-dark/10 px-3 py-2 text-xs font-semibold text-brand-primary-dark">
+            <Info className="h-4 w-4 shrink-0" />
+            That sign-in attempt took too long and expired — please sign in again.
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -97,11 +116,11 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={isLoggingIn}
             className="btn-gold flex w-full items-center justify-center gap-2 overflow-hidden py-3.5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60"
           >
             <span className="relative z-10 flex items-center gap-2">
-              {submitting ? "Signing in…" : "Sign in"} <ArrowRight className="h-4 w-4" />
+              {isLoggingIn ? "Signing in…" : "Sign in"} <ArrowRight className="h-4 w-4" />
             </span>
           </button>
         </form>
