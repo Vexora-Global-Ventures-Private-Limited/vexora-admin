@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { isStepUpFresh, useAdminSession } from "@/lib/admin-session"
+import { useAdminAuth } from "@/hooks/use-admin-auth"
+import { getApiErrorMessage } from "@/lib/api-error"
 
 /**
  * Gates a sensitive admin action behind TOTP step-up re-verification when the
@@ -12,6 +14,12 @@ import { isStepUpFresh, useAdminSession } from "@/lib/admin-session"
  * extend/remove already carry the higher-risk gate, and reject already has
  * its own reason-capture dialog as a soft confirmation.
  *
+ * The code the admin enters here is checked for real against
+ * `POST /admin/auth/totp/verify` (see use-admin-auth.ts's `verifyStepUp`) —
+ * it's the same endpoint the backend uses to answer a live 401
+ * TOTP_STEPUP_REQUIRED, just triggered preemptively client-side from
+ * `totpVerifiedAt` staleness rather than reactively off a 401.
+ *
  * Note: when the session IS fresh, `run()` fires the action with no modal at
  * all — callers of actions with real consequences (suspend, remove, revoke)
  * should wrap their trigger in an AlertDialog so there's always at least one
@@ -19,30 +27,39 @@ import { isStepUpFresh, useAdminSession } from "@/lib/admin-session"
  */
 export function useStepUp() {
   const totpVerifiedAt = useAdminSession((s) => s.totpVerifiedAt)
-  const markTotpVerified = useAdminSession((s) => s.markTotpVerified)
+  const { verifyStepUp, isVerifying } = useAdminAuth()
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null)
   const [code, setCode] = useState("")
+  const [error, setError] = useState("")
 
   function run(action: () => void) {
     if (isStepUpFresh(totpVerifiedAt)) {
       action()
       return
     }
+    setError("")
     setPendingAction(() => action)
   }
 
-  function confirm() {
+  async function confirm() {
     if (code.length !== 6) return
-    markTotpVerified()
-    pendingAction?.()
-    setPendingAction(null)
-    setCode("")
+    setError("")
+    try {
+      await verifyStepUp(code)
+      pendingAction?.()
+      setPendingAction(null)
+      setCode("")
+    } catch (err) {
+      setError(getApiErrorMessage(err) ?? "Invalid or expired code — please try again.")
+      setCode("")
+    }
   }
 
   function cancel() {
     setPendingAction(null)
     setCode("")
+    setError("")
   }
 
-  return { open: pendingAction !== null, code, setCode, run, confirm, cancel }
+  return { open: pendingAction !== null, code, setCode, run, confirm, cancel, isVerifying, error }
 }

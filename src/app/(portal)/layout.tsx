@@ -8,7 +8,7 @@ import {
 } from "lucide-react"
 import { AdminShell, type AdminNavItem } from "@/components/admin/admin-shell"
 import { useAdminGuard } from "@/lib/use-admin-guard"
-import { useAdminSession } from "@/lib/admin-session"
+import { useAdminAuth } from "@/hooks/use-admin-auth"
 import { useQueueCounts } from "@/lib/admin-data-store"
 import { ROUTES } from "@/lib/routes"
 
@@ -42,7 +42,13 @@ const TOPBAR_SUBTITLE: Record<string, string> = {
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {
   const { ready, adminUser, elevated } = useAdminGuard()
-  const logout = useAdminSession((s) => s.logout)
+  // Clears the real accessToken (localStorage), not just the cached
+  // adminUser display state — the raw zustand store's logout() alone would
+  // leave a still-valid 8h bearer token sitting in localStorage after
+  // "Sign out" (no server-side revoke exists for it either — admin_auth.json
+  // has no logout endpoint, so the token would keep working until it
+  // naturally expires).
+  const { logout } = useAdminAuth()
   const pathname = usePathname()
   const queueCounts = useQueueCounts()
 

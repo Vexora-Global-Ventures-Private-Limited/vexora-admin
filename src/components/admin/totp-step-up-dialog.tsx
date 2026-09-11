@@ -9,7 +9,7 @@ import type { useStepUp } from "@/lib/use-step-up"
 type TotpStepUpDialogProps = ReturnType<typeof useStepUp>
 
 /** Re-verification modal for step-up-gated actions — see useStepUp for the trigger logic. */
-export function TotpStepUpDialog({ open, code, setCode, confirm, cancel }: TotpStepUpDialogProps) {
+export function TotpStepUpDialog({ open, code, setCode, confirm, cancel, isVerifying, error }: TotpStepUpDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && cancel()}>
       <DialogContent className="max-w-sm">
@@ -23,10 +23,11 @@ export function TotpStepUpDialog({ open, code, setCode, confirm, cancel }: TotpS
           </DialogDescription>
         </DialogHeader>
         <div className="flex justify-center py-2">
-          <OtpInputGroup value={code} onChange={setCode} onComplete={confirm} />
+          <OtpInputGroup value={code} onChange={setCode} onComplete={confirm} disabled={isVerifying} />
         </div>
-        <Button className="btn-gold w-full" disabled={code.length !== 6} onClick={confirm}>
-          Verify &amp; continue
+        {error && <p className="text-center text-xs font-semibold text-red-600">{error}</p>}
+        <Button className="btn-gold w-full" disabled={code.length !== 6 || isVerifying} onClick={confirm}>
+          {isVerifying ? "Verifying…" : "Verify & continue"}
         </Button>
       </DialogContent>
     </Dialog>
