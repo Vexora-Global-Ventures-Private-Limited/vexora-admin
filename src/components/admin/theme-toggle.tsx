@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useSyncExternalStore } from "react"
 import { useTheme } from "next-themes"
 import { Moon, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -9,9 +9,13 @@ import { Button } from "@/components/ui/button"
  *  ships both `:root` and `.dark` token sets (shared with VXP's brand tokens). */
 export function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme()
-  const [mounted, setMounted] = useState(false)
-
-  useEffect(() => setMounted(true), [])
+  // false during SSR/hydration, true on the client — the resolved theme is
+  // only known client-side. (Replaces a setState-in-effect "mounted" flag.)
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  )
 
   if (!mounted) return <div className="h-9 w-9" />
 

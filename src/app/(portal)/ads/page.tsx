@@ -2,137 +2,124 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
-import { toast } from "sonner"
+import { RotateCcw, ShieldAlert } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { DataTable, type DataTableColumn } from "@/components/admin/data-table"
 import { FilterBar } from "@/components/admin/filter-bar"
 import { StatusPill } from "@/components/admin/status-pill"
-import { TotpStepUpDialog } from "@/components/admin/totp-step-up-dialog"
-import { RejectionDialog } from "@/components/admin/rejection-dialog"
-import { useStepUp } from "@/lib/use-step-up"
-import { useAdminDataStore } from "@/lib/admin-data-store"
-import type { AdQueueItem } from "@/lib/admin-data"
+import {
+  AD_PRODUCT_LABEL,
+  PendingAdButtons,
+  adProductLabel,
+  adStatusLabel,
+  adTarget,
+  hasUnsafeCreative,
+  runWindowEnded,
+  useAdActions,
+} from "@/components/admin/ads/ad-actions"
+import { AdPackagesSection } from "@/components/admin/ads/ad-packages"
+import { QueryState, ShortId, UserLink, formatDate, formatDateTime, formatPaise } from "@/components/admin/moderation/shared"
+import { useGetAdQueueQuery, type AdminAd } from "@/store/api/adminApi"
 import { ROUTES } from "@/lib/routes"
 
-const SLOTS: AdQueueItem["slot"][] = ["Homepage Hero", "Search Spotlight", "Featured Developer"]
-const PAYMENT_STATUSES: AdQueueItem["paymentStatus"][] = ["Paid", "Pending"]
-const APPROVAL_STATUSES: AdQueueItem["approvalStatus"][] = ["Under Review", "Approved", "Rejected"]
-
+/**
+ * G6 ad approval queue — every ad product must pass through here before it
+ * goes live (BR-62). Rejection never costs the advertiser a second payment.
+ */
 export default function AdsPage() {
-  const queue = useAdminDataStore((s) => s.ads)
-  const publishAd = useAdminDataStore((s) => s.publishAd)
-  const rejectAd = useAdminDataStore((s) => s.rejectAd)
-  const [rejectingId, setRejectingId] = useState<string | null>(null)
-  const [reason, setReason] = useState("")
-  const [slotFilter, setSlotFilter] = useState("all")
-  const [paymentFilter, setPaymentFilter] = useState("all")
-  const [approvalFilter, setApprovalFilter] = useState("all")
-  const stepUp = useStepUp()
+  const { data, isLoading, isFetching, error, refetch } = useGetAdQueueQuery(undefined, { refetchOnMountOrArgChange: true })
+  const actions = useAdActions()
+  const [productFilter, setProductFilter] = useState("all")
 
-  const filtered = useMemo(
-    () =>
-      queue
-        .filter((a) => slotFilter === "all" || a.slot === slotFilter)
-        .filter((a) => paymentFilter === "all" || a.paymentStatus === paymentFilter)
-        .filter((a) => approvalFilter === "all" || a.approvalStatus === approvalFilter),
-    [queue, slotFilter, paymentFilter, approvalFilter],
-  )
+  const ads = useMemo(() => (data ?? []).filter((a) => productFilter === "all" || a.product === productFilter), [data, productFilter])
 
-  const publish = (id: string) =>
-    stepUp.run(() => {
-      publishAd(id)
-      toast.success(`${id} published`)
-    })
-  const confirmReject = () => {
-    if (!rejectingId) return
-    stepUp.run(() => {
-      rejectAd(rejectingId, reason)
-      toast.warning(`${rejectingId} rejected — advertiser can resubmit free`, { description: "Audit-logged." })
-      setRejectingId(null)
-      setReason("")
-    })
-  }
-
-  const columns: DataTableColumn<AdQueueItem>[] = [
+  const columns: DataTableColumn<AdminAd>[] = [
     {
-      key: "ad", header: "Ad", sortable: true, sortValue: (a) => a.headline, render: (a) => (
-        <Link href={ROUTES.adDetail(a.id)} className="hover:underline">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-brand-primary-dark">{a.id}</span>
-            <span className="rounded-full bg-brand-tertiary px-2 py-0.5 text-[10px] font-bold text-brand-primary-dark">{a.slot}</span>
-          </div>
-          <div className="text-xs font-bold text-brand-secondary">{a.headline}</div>
+      key: "product",
+      header: "Ad",
+      sortable: true,
+      sortValue: (a) => a.product,
+      render: (a) => (
+        <Link href={ROUTES.adDetail(a._id)} className="block hover:underline">
+          <div className="text-xs font-bold text-brand-secondary">{adProductLabel(a.product)}</div>
+          <ShortId id={a._id} className="text-brand-secondary/50" />
+          {hasUnsafeCreative(a) && (
+            <div className="mt-0.5 flex items-center gap-1 text-[10px] font-semibold text-red-600">
+              <ShieldAlert className="h-3 w-3" /> unsafe creative URL
+            </div>
+          )}
         </Link>
       ),
     },
-    { key: "advertiser", header: "Advertiser", sortable: true, sortValue: (a) => a.advertiser, render: (a) => <span className="text-brand-secondary/65">{a.advertiser}</span> },
-    { key: "amount", header: "Amount", sortable: true, sortValue: (a) => Number(a.amount.replace(/[₹,]/g, "")), render: (a) => <span className="font-bold">{a.amount}</span> },
-    { key: "submittedAt", header: "Submitted", sortable: true, sortValue: (a) => a.submittedAt, render: (a) => <span className="text-brand-secondary/55">{a.submittedAt}</span> },
-    { key: "payment", header: "Payment", sortable: true, sortValue: (a) => a.paymentStatus, render: (a) => <StatusPill tone={a.paymentStatus === "Paid" ? "success" : "warning"}>{a.paymentStatus}</StatusPill> },
-    { key: "approval", header: "Approval", sortable: true, sortValue: (a) => a.approvalStatus, render: (a) => <StatusPill tone={a.approvalStatus === "Approved" ? "success" : a.approvalStatus === "Rejected" ? "danger" : "warning"}>{a.approvalStatus}</StatusPill> },
     {
-      key: "actions", header: "Actions", render: (a) =>
-        a.approvalStatus === "Under Review" && a.paymentStatus === "Paid" ? (
-          <div className="flex gap-1.5">
-            <AlertDialog>
-              <AlertDialogTrigger asChild>
-                <Button size="sm" className="btn-gold">Publish</Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>Publish this ad?</AlertDialogTitle>
-                  <AlertDialogDescription>It goes live in its slot immediately.</AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                  <AlertDialogAction onClick={() => publish(a.id)}>Publish</AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-            <Button size="sm" variant="destructive" onClick={() => setRejectingId(a.id)}>Reject</Button>
-          </div>
-        ) : (
-          <Link href={ROUTES.adDetail(a.id)} className="text-[11px] font-bold text-brand-primary-dark hover:underline">
-            View →
-          </Link>
-        ),
+      key: "target",
+      header: "Target",
+      render: (a) => {
+        const t = adTarget(a)
+        return (
+          <span className="text-xs text-brand-secondary/70">
+            {t.label}: {"id" in t ? <ShortId id={t.id} /> : t.text}
+          </span>
+        )
+      },
+    },
+    { key: "owner", header: "Advertiser", render: (a) => <UserLink id={a.ownerId} className="text-brand-secondary/65" /> },
+    { key: "amount", header: "Amount", sortable: true, sortValue: (a) => a.amountPaise ?? 0, render: (a) => <span className="font-bold">{formatPaise(a.amountPaise)}</span> },
+    {
+      key: "run",
+      header: "Runs",
+      render: (a) => (
+        <div className="whitespace-nowrap text-[11px] text-brand-secondary/55">
+          {a.startsAt ? `${formatDate(a.startsAt)} → ${formatDate(a.endsAt)}` : "—"}
+          {runWindowEnded(a) && <div className="font-semibold text-red-600">Run window ended</div>}
+        </div>
+      ),
+    },
+    { key: "createdAt", header: "Submitted", sortable: true, sortValue: (a) => a.createdAt, render: (a) => <span className="whitespace-nowrap text-brand-secondary/55">{formatDateTime(a.createdAt)}</span> },
+    {
+      key: "actions",
+      header: "Actions",
+      render: (a) =>
+        a.status === "pending_review" ? <PendingAdButtons ad={a} actions={actions} /> : <StatusPill>{adStatusLabel(a.status)}</StatusPill>,
     },
   ]
 
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-brand-secondary/60">Confirm ad payment, review creative, publish or reject — rejection never requires a second payment (BR-62/63).</p>
-      <FilterBar
-        filters={[
-          { key: "slot", label: "Slot", value: slotFilter, onChange: setSlotFilter, options: SLOTS.map((s) => ({ label: s, value: s })) },
-          { key: "payment", label: "Payment", value: paymentFilter, onChange: setPaymentFilter, options: PAYMENT_STATUSES.map((s) => ({ label: s, value: s })) },
-          { key: "approval", label: "Approval", value: approvalFilter, onChange: setApprovalFilter, options: APPROVAL_STATUSES.map((s) => ({ label: s, value: s })) },
-        ]}
-      />
-      <DataTable columns={columns} rows={filtered} rowKey={(a) => a.id} defaultSortKey="submittedAt" defaultSortDirection="asc" />
+    <div className="space-y-8">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-brand-secondary/60">
+            Paid ads waiting for review. Nothing goes live without approval — rejection never requires a second payment (BR-62/63).
+          </p>
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => refetch()} disabled={isFetching}>
+            <RotateCcw className={isFetching ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} /> Refresh
+          </Button>
+        </div>
+        <FilterBar
+          filters={[
+            {
+              key: "product",
+              label: "Product",
+              value: productFilter,
+              onChange: setProductFilter,
+              options: Object.entries(AD_PRODUCT_LABEL).map(([value, label]) => ({ value, label })),
+            },
+          ]}
+        />
+        <QueryState isLoading={isLoading} error={error} onRetry={refetch} isFetching={isFetching}>
+          <DataTable
+            columns={columns}
+            rows={ads}
+            rowKey={(a) => a._id}
+            defaultSortKey="createdAt"
+            defaultSortDirection="asc"
+            pageSize={10}
+            emptyLabel={productFilter === "all" ? "No ads are waiting for review." : "No ads of this product are waiting for review."}
+          />
+        </QueryState>
+      </div>
 
-      <RejectionDialog
-        open={!!rejectingId}
-        onOpenChange={(o) => !o && setRejectingId(null)}
-        title="Reject this ad"
-        description="The advertiser will see this reason and can resubmit for free."
-        reason={reason}
-        onReasonChange={setReason}
-        onConfirm={confirmReject}
-        placeholder="e.g. Creative image is low resolution — please re-upload."
-      />
-      <TotpStepUpDialog {...stepUp} />
+      <AdPackagesSection />
     </div>
   )
 }
