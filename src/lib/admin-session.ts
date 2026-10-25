@@ -2,6 +2,7 @@
 
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
+import { getTokenTotpVerifiedAt } from "@/lib/admin-tokens"
 
 // Only super_admin is seeded today (PARTNER-AUTH-INTEGRATION.md §4), but the
 // backend's `admin.role` already models the other three for when more admins
@@ -81,8 +82,16 @@ export const useAdminSession = create<AdminSessionState>()(
   ),
 )
 
+/**
+ * Uses the later of this tab's own record and the `totpVerifiedAt` claim in
+ * the current token — the server enforces the window from the token, so a
+ * step-up done in another tab (which writes a fresh token to shared
+ * localStorage) counts here too, and the dialog isn't shown needlessly.
+ */
 export function isStepUpFresh(totpVerifiedAt: number | null) {
-  return totpVerifiedAt != null && Date.now() - totpVerifiedAt < STEP_UP_WINDOW_MS
+  const fromToken = getTokenTotpVerifiedAt()
+  const latest = Math.max(totpVerifiedAt ?? 0, fromToken ?? 0)
+  return latest > 0 && Date.now() - latest < STEP_UP_WINDOW_MS
 }
 
 const roleName: Record<AdminRole, string> = {

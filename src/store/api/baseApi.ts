@@ -55,7 +55,11 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
     if (!code || !NON_SESSION_KILLING_401_CODES.has(code)) {
       clearAccessToken()
       useAdminSession.getState().logout()
-      if (typeof window !== "undefined") window.location.href = ROUTES.login
+      // Say why (the login page shows it), and never bounce someone who's
+      // already on the sign-in screens — that would wipe a half-typed login.
+      if (typeof window !== "undefined" && !/^\/(login|totp)/.test(window.location.pathname)) {
+        window.location.replace(`${ROUTES.login}?session=expired`)
+      }
     }
   }
 
@@ -65,6 +69,19 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
 export const baseApi = createApi({
   reducerPath: "vexoraAdminApi",
   baseQuery: baseQueryWithReauth,
-  tagTypes: [],
+  tagTypes: [
+    "Dashboard",
+    "Users",
+    "ListingQueue",
+    "AdQueue",
+    "AdPackages",
+    "Abuse",
+    "Config",
+    "Plans",
+    "Amenities",
+    "Locations",
+    "Templates",
+    "Audit",
+  ],
   endpoints: () => ({}),
 })

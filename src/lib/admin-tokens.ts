@@ -56,3 +56,42 @@ export function clearOtpauthUrl(): void {
   if (typeof window === "undefined") return
   window.sessionStorage.removeItem(OTPAUTH_URL_KEY)
 }
+
+// ── Access-token claims ───────────────────────────────────────────────────────
+// The admin JWT carries `exp` and `totpVerifiedAt` (verified live 2026-10-25:
+// { sub, type: "admin", role, totpVerifiedAt, iat, exp }). Reading them here
+// lets the UI notice an expired 8h session before the next request 401s, and
+// lets the step-up check use the server's own verification time rather than
+// only this tab's clock. Decoding is display-only — the server still verifies
+// the signature on every call.
+
+type AccessTokenClaims = { exp?: number; totpVerifiedAt?: string; role?: string }
+
+function decodeClaims(token: string): AccessTokenClaims | null {
+  try {
+    const payload = token.split(".")[1]
+    if (!payload) return null
+    const json = atob(payload.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(payload.length / 4) * 4, "="))
+    return JSON.parse(json) as AccessTokenClaims
+  } catch {
+    return null
+  }
+}
+
+/** True when there's no token, or its `exp` has passed (with a 30s margin for clock skew). */
+export function isAccessTokenExpired(token: string | null = getAccessToken()): boolean {
+  if (!token) return true
+  const exp = decodeClaims(token)?.exp
+  return typeof exp === "number" ? Date.now() >= exp * 1000 - 30_000 : false
+}
+
+/** Epoch ms of the last TOTP check baked into the current token, if any. */
+export function getTokenTotpVerifiedAt(): number | null {
+  const token = getAccessToken()
+  const value = token ? decodeClaims(token)?.totpVerifiedAt : undefined
+  const ms = value ? Date.parse(value) : NaN
+  return Number.isNaN(ms) ? null : ms
+}
+
+/** localStorage key, exported so other tabs' sign-in/out can be detected via the `storage` event. */
+export const ADMIN_ACCESS_TOKEN_STORAGE_KEY = ACCESS_TOKEN_KEY

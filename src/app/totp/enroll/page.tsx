@@ -1,16 +1,16 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
 import QRCode from "qrcode"
-import { ShieldCheck, ArrowRight, AlertCircle, Copy, Check } from "lucide-react"
+import { ShieldCheck, ArrowRight, AlertCircle, Copy, Check, Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { OtpInputGroup } from "@/components/admin/otp-input-group"
 import { useAdminAuth } from "@/hooks/use-admin-auth"
 import { clearOtpauthUrl, clearTempToken, getOtpauthUrl, getTempToken } from "@/lib/admin-tokens"
-import { getApiErrorCode, getApiErrorMessage } from "@/lib/api-error"
+import { describeAuthError, getApiErrorCode } from "@/lib/api-error"
 import { ROUTES } from "@/lib/routes"
 
 /** Pulls the `secret=` param out of an otpauth:// URI for the "enter key
@@ -21,27 +21,39 @@ function extractSecret(otpauthUrl: string): string | null {
   return match ? decodeURIComponent(match[1]) : null
 }
 
+/** Groups a base32 secret in 4s so it can be typed without losing your place. */
+function groupSecret(secret: string) {
+  return secret.replace(/(.{4})/g, "$1 ").trim()
+}
+
+const noopSubscribe = () => () => {}
+const readEnrollState = () => (getTempToken() ? getOtpauthUrl() : null)
+
 export default function TotpEnrollPage() {
   const router = useRouter()
   const { enroll, isEnrolling } = useAdminAuth()
-  const [ready, setReady] = useState(false)
+  // The otpauth URL + tempToken from /login (sessionStorage). Read through
+  // useSyncExternalStore — no SSR access, no setState-in-effect. Snapshotted
+  // into state once seen, because enroll() clears both from storage on
+  // success and the QR/secret must not vanish mid-render.
+  const stored = useSyncExternalStore(noopSubscribe, readEnrollState, () => undefined)
   const [otpauthUrl, setOtpauthUrl] = useState<string | null>(null)
+  if (stored && otpauthUrl !== stored && !otpauthUrl) setOtpauthUrl(stored)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [qrFailed, setQrFailed] = useState(false)
   const [code, setCode] = useState("")
   const [error, setError] = useState("")
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null)
   const [acknowledged, setAcknowledged] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const inFlight = useRef(false)
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
+  // No enrollment in progress (direct nav, closed tab, expired) → /login.
   useEffect(() => {
-    const url = getOtpauthUrl()
-    if (!getTempToken() || !url) {
-      router.replace(ROUTES.login)
-      return
-    }
-    setOtpauthUrl(url)
-    setReady(true)
-  }, [router])
+    if (stored === null && !otpauthUrl && !recoveryCodes && !busy) router.replace(ROUTES.login)
+  }, [stored, otpauthUrl, recoveryCodes, busy, router])
 
   useEffect(() => {
     if (!otpauthUrl) return
@@ -51,33 +63,55 @@ export default function TotpEnrollPage() {
         if (!cancelled) setQrDataUrl(dataUrl)
       })
       .catch(() => {
-        // QR render failure isn't fatal — the manual-entry secret below still works.
+        // Not fatal — the manual-entry secret below still works.
+        if (!cancelled) setQrFailed(true)
       })
     return () => {
       cancelled = true
     }
   }, [otpauthUrl])
 
-  const verify = async () => {
-    if (code.length !== 6) return
+  // The recovery codes exist only in this component's memory and are never
+  // shown again (bcrypt-hashed server-side). Warn before a refresh/close
+  // until the admin confirms they've saved them.
+  useEffect(() => {
+    if (!recoveryCodes || acknowledged) return
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [recoveryCodes, acknowledged])
+
+  useEffect(() => () => clearTimeout(copyTimer.current), [])
+
+  // `value` comes from the OTP input's onComplete — `code` state is still
+  // one digit behind at that moment.
+  const verify = async (value?: string) => {
+    const submitted = value ?? code
+    if (submitted.length !== 6 || inFlight.current) return
+    inFlight.current = true
+    setBusy(true)
     setError("")
     try {
-      const codes = await enroll(code)
+      const codes = await enroll(submitted)
       setRecoveryCodes(codes)
     } catch (err) {
       const errCode = getApiErrorCode(err)
-      // Same dead-tempToken case as /totp/verify — and TOTP_ALREADY_ENROLLED
-      // means another tab/device finished enrolling this account first
-      // while this one sat open; either way, retrying here can't succeed,
-      // so send the admin back to /login for a clean restart.
+      // Dead tempToken, or TOTP_ALREADY_ENROLLED (another tab/device finished
+      // enrolling this account first) — retrying here can't succeed.
       if (errCode === "TEMP_TOKEN_INVALID" || errCode === "TOTP_ALREADY_ENROLLED") {
         clearTempToken()
         clearOtpauthUrl()
         router.replace(`${ROUTES.login}?expired=1`)
         return
       }
-      setError(getApiErrorMessage(err) ?? "Invalid code — please try again.")
+      setError(describeAuthError(err))
       setCode("")
+    } finally {
+      inFlight.current = false
+      setBusy(false)
     }
   }
 
@@ -86,13 +120,28 @@ export default function TotpEnrollPage() {
     try {
       await navigator.clipboard.writeText(recoveryCodes.join("\n"))
       setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      clearTimeout(copyTimer.current)
+      copyTimer.current = setTimeout(() => setCopied(false), 2000)
     } catch {
-      // Clipboard access can be denied — the codes are still visible to copy by hand.
+      setError("Couldn't copy automatically — select the codes and copy them, or use Download.")
     }
   }
 
-  if (!ready) return null
+  const downloadRecoveryCodes = () => {
+    if (!recoveryCodes) return
+    const text = `Vexora Admin — recovery codes\nGenerated ${new Date().toISOString()}\nEach code works once. Keep this file somewhere safe and offline.\n\n${recoveryCodes.join("\n")}\n`
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }))
+    const a = document.createElement("a")
+    a.href = url
+    a.download = "vexora-admin-recovery-codes.txt"
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    // Revoke on the next tick — revoking synchronously can cancel the download.
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  }
+
+  if (!otpauthUrl && !recoveryCodes) return null
 
   const secret = otpauthUrl ? extractSecret(otpauthUrl) : null
 
@@ -121,10 +170,11 @@ export default function TotpEnrollPage() {
 
             <div className="mt-5 flex justify-center">
               {qrDataUrl ? (
-                <img src={qrDataUrl} alt="Authenticator QR code" className="h-[200px] w-[200px] border border-brand-border-light" />
+                // eslint-disable-next-line @next/next/no-img-element -- a generated data: URL, nothing for next/image to optimise
+                <img src={qrDataUrl} alt="QR code to add Vexora Admin to your authenticator app" className="h-[200px] w-[200px] border border-brand-border-light bg-white" />
               ) : (
-                <div className="grid h-[200px] w-[200px] place-items-center border border-brand-border-light text-xs text-brand-secondary/50">
-                  Generating QR…
+                <div className="grid h-[200px] w-[200px] place-items-center border border-brand-border-light px-4 text-xs text-brand-secondary/50">
+                  {qrFailed ? "Couldn't draw the QR code — use the key below instead." : "Generating QR…"}
                 </div>
               )}
             </div>
@@ -133,50 +183,77 @@ export default function TotpEnrollPage() {
               <p className="mt-3 text-[11px] leading-relaxed text-brand-secondary/50">
                 Can&apos;t scan? Enter this key manually:
                 <br />
-                <span className="font-mono text-[11px] tracking-wide text-brand-secondary">{secret}</span>
+                <span className="select-all break-all font-mono text-[11px] tracking-wide text-brand-secondary">{groupSecret(secret)}</span>
               </p>
             )}
 
-            <div className="mt-6 flex justify-center">
-              <OtpInputGroup value={code} onChange={setCode} onComplete={verify} disabled={isEnrolling} />
-            </div>
-
-            {error && (
-              <div className="mt-4 flex items-center justify-center gap-2 border border-red-600/30 bg-red-600/10 px-3 py-2 text-xs font-semibold text-red-600">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                {error}
-              </div>
-            )}
-
-            <Button
-              className="btn-gold mt-6 flex w-full items-center justify-center gap-2"
-              disabled={code.length !== 6 || isEnrolling}
-              onClick={verify}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                void verify()
+              }}
             >
-              {isEnrolling ? "Verifying…" : "Verify & continue"} <ArrowRight className="h-4 w-4" />
-            </Button>
+              <div className="mt-6 flex justify-center">
+                <OtpInputGroup
+                  value={code}
+                  onChange={(v) => {
+                    setCode(v)
+                    if (error) setError("")
+                  }}
+                  onComplete={(v) => void verify(v)}
+                  disabled={isEnrolling}
+                  invalid={!!error}
+                />
+              </div>
+
+              {error && (
+                <div role="alert" className="mt-4 flex items-center justify-center gap-2 border border-red-600/30 bg-red-600/10 px-3 py-2 text-xs font-semibold text-red-600">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  {error}
+                </div>
+              )}
+
+              <Button type="submit" className="btn-gold mt-6 flex w-full items-center justify-center gap-2" disabled={code.length !== 6 || isEnrolling}>
+                {isEnrolling ? "Verifying…" : "Verify & continue"} <ArrowRight className="h-4 w-4" />
+              </Button>
+            </form>
           </>
         ) : (
           <>
             <h1 className="mt-3 font-serif text-2xl font-bold text-brand-secondary">Save your recovery codes</h1>
             <p className="mt-1 text-sm text-brand-secondary/60">
-              These 10 codes are shown once, ever. Each works one time if you lose access to your authenticator app.
+              These 10 codes are shown once, ever — leaving or refreshing this page loses them. Each works one time if you lose access to your authenticator app.
             </p>
 
-            <div className="mt-5 grid grid-cols-2 gap-2 border border-brand-border-light bg-brand-tertiary/40 p-4 font-mono text-xs text-brand-secondary">
-              {recoveryCodes.map((rc) => (
-                <div key={rc}>{rc}</div>
+            <ul aria-label="Recovery codes" className="mt-5 grid select-all grid-cols-2 gap-2 border border-brand-border-light bg-brand-tertiary/40 p-4 font-mono text-xs text-brand-secondary">
+              {recoveryCodes.map((rc, i) => (
+                <li key={`${i}-${rc}`}>{rc}</li>
               ))}
+            </ul>
+
+            <div className="mt-3 flex items-center justify-center gap-4">
+              <button
+                type="button"
+                onClick={copyRecoveryCodes}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary-dark hover:underline"
+              >
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                <span aria-live="polite">{copied ? "Copied" : "Copy all"}</span>
+              </button>
+              <button
+                type="button"
+                onClick={downloadRecoveryCodes}
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary-dark hover:underline"
+              >
+                <Download className="h-3.5 w-3.5" /> Download .txt
+              </button>
             </div>
 
-            <button
-              type="button"
-              onClick={copyRecoveryCodes}
-              className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary-dark hover:underline"
-            >
-              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              {copied ? "Copied" : "Copy all codes"}
-            </button>
+            {error && (
+              <p role="alert" className="mt-3 text-xs font-semibold text-red-600">
+                {error}
+              </p>
+            )}
 
             <label className="mt-5 flex cursor-pointer items-start gap-2 text-left text-xs text-brand-secondary/70">
               <Checkbox checked={acknowledged} onCheckedChange={(v) => setAcknowledged(v === true)} className="mt-0.5" />
@@ -186,7 +263,7 @@ export default function TotpEnrollPage() {
             <Button
               className="btn-gold mt-6 flex w-full items-center justify-center gap-2"
               disabled={!acknowledged}
-              onClick={() => router.push(ROUTES.dashboard)}
+              onClick={() => router.replace(ROUTES.dashboard)}
             >
               Continue to dashboard <ArrowRight className="h-4 w-4" />
             </Button>

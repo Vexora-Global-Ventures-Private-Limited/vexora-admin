@@ -9,7 +9,7 @@ import type { useStepUp } from "@/lib/use-step-up"
 type TotpStepUpDialogProps = ReturnType<typeof useStepUp>
 
 /** Re-verification modal for step-up-gated actions — see useStepUp for the trigger logic. */
-export function TotpStepUpDialog({ open, code, setCode, confirm, cancel, isVerifying, error }: TotpStepUpDialogProps) {
+export function TotpStepUpDialog({ open, code, setCode, confirm, cancel, isVerifying, error, reason }: TotpStepUpDialogProps) {
   return (
     <Dialog open={open} onOpenChange={(o) => !o && cancel()}>
       <DialogContent className="max-w-sm">
@@ -19,7 +19,9 @@ export function TotpStepUpDialog({ open, code, setCode, confirm, cancel, isVerif
           </div>
           <DialogTitle className="text-center font-serif text-xl">Re-verify to continue</DialogTitle>
           <DialogDescription className="text-center">
-            This action needs a fresh OTP — your last check was over 15 minutes ago.
+            {reason === "server"
+              ? "The server asked for a fresh code before this action — enter the current one from your authenticator."
+              : "This action needs a fresh code — your last check was over 15 minutes ago."}
           </DialogDescription>
         </DialogHeader>
         <div className="flex justify-center py-2">

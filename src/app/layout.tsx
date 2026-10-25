@@ -43,6 +43,10 @@ export const metadata: Metadata = {
   title: "VXA — Vexora Admin",
   description: "Vexora operations console — approve, verify, publish, monitor.",
   robots: { index: false, follow: false, nocache: true },
+  // The console ships its own light/dark theme. Without this, the Dark
+  // Reader extension rewrites inline styles before React hydrates and every
+  // page logs a hydration-mismatch error in dev.
+  other: { "darkreader-lock": "true" },
 }
 
 export default function RootLayout({

@@ -1,152 +1,97 @@
 "use client"
 
-import { useMemo, useState } from "react"
 import Link from "next/link"
-import { toast } from "sonner"
-import { Check, X, Clock, Trash2 } from "lucide-react"
+import { RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { DataTable, type DataTableColumn } from "@/components/admin/data-table"
-import { FilterBar } from "@/components/admin/filter-bar"
 import { StatusPill } from "@/components/admin/status-pill"
-import { TotpStepUpDialog } from "@/components/admin/totp-step-up-dialog"
-import { RejectionDialog } from "@/components/admin/rejection-dialog"
-import { useStepUp } from "@/lib/use-step-up"
-import { useAdminDataStore } from "@/lib/admin-data-store"
-import { LISTING_STATUS_TONE, LISTING_STATUSES } from "@/lib/listing-status"
-import type { ListingQueueItem } from "@/lib/admin-data"
+import { PendingListingButtons, LiveListingTools, useListingActions } from "@/components/admin/moderation/listing-actions"
+import { QueryState, UserLink, formatDateTime, formatPaise } from "@/components/admin/moderation/shared"
+import { listingStatusLabel, listingStatusTone } from "@/lib/listing-status"
+import { useGetListingQueueQuery, type AdminListing } from "@/store/api/adminApi"
 import { ROUTES } from "@/lib/routes"
 
+function place(l: AdminListing) {
+  return [l.locality, l.city].filter(Boolean).join(", ") || "Location not given"
+}
+
+function specs(l: AdminListing) {
+  return [l.bhk ? `${l.bhk} BHK` : null, l.propertyType, l.purpose === "rent" ? "for rent" : l.purpose === "sale" ? "for sale" : l.purpose]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+/**
+ * G4 moderation queue — every listing in `pending_review`, oldest first.
+ * The API returns full raw listing documents; only the fields a reviewer
+ * needs are shown. A submitted listing stays invisible to buyers until it's
+ * approved here.
+ */
 export default function ListingsPage() {
-  const queue = useAdminDataStore((s) => s.listings)
-  const approveListing = useAdminDataStore((s) => s.approveListing)
-  const rejectListing = useAdminDataStore((s) => s.rejectListing)
-  const extendListing = useAdminDataStore((s) => s.extendListing)
-  const removeListing = useAdminDataStore((s) => s.removeListing)
-  const [rejectingId, setRejectingId] = useState<string | null>(null)
-  const [reason, setReason] = useState("")
-  const [statusFilter, setStatusFilter] = useState("all")
-  const stepUp = useStepUp()
+  const { data, isLoading, isFetching, error, refetch } = useGetListingQueueQuery(undefined, { refetchOnMountOrArgChange: true })
+  const actions = useListingActions()
+  const listings = data ?? []
 
-  const filtered = useMemo(
-    () => queue.filter((l) => statusFilter === "all" || l.status === statusFilter),
-    [queue, statusFilter],
-  )
-
-  // Approve/reject stay ungated by step-up — extend/remove already carry the
-  // higher-risk TOTP gate, and reject already has its reason-capture dialog
-  // as a soft confirmation; approve gets an AlertDialog instead.
-  const approve = (id: string) => {
-    approveListing(id)
-    toast.success(`${id} approved — now live`)
-  }
-  const confirmReject = () => {
-    if (!rejectingId) return
-    rejectListing(rejectingId, reason)
-    toast.warning(`${rejectingId} rejected`, { description: "Audit-logged." })
-    setRejectingId(null)
-    setReason("")
-  }
-  const extend = (id: string) =>
-    stepUp.run(() => {
-      const newExpiresAt = extendListing(id, 30)
-      toast.success(`${id} extended to ${newExpiresAt}`, { description: "Audit-logged." })
-    })
-  const remove = (id: string) =>
-    stepUp.run(() => {
-      removeListing(id)
-      toast.warning(`${id} removed from marketplace`, { description: "Audit-logged." })
-    })
-
-  const columns: DataTableColumn<ListingQueueItem>[] = [
+  const columns: DataTableColumn<AdminListing>[] = [
     {
-      key: "title", header: "Listing", sortable: true, sortValue: (l) => l.title, render: (l) => (
-        <Link href={ROUTES.listingDetail(l.id)} className="hover:underline">
-          <div className="text-xs font-bold text-brand-secondary">{l.title}</div>
-          <div className="text-[10px] text-brand-secondary/55">{l.location}</div>
+      key: "title",
+      header: "Listing",
+      sortable: true,
+      sortValue: (l) => l.title ?? "",
+      render: (l) => (
+        <Link href={ROUTES.listingDetail(l._id)} className="block max-w-[260px] hover:underline">
+          <div className="truncate text-xs font-bold text-brand-secondary">{l.title || "Untitled listing"}</div>
+          <div className="truncate text-[10px] text-brand-secondary/55">{place(l)}</div>
         </Link>
       ),
     },
-    { key: "submittedBy", header: "Submitted by", sortable: true, sortValue: (l) => l.submittedBy, render: (l) => <span className="text-brand-secondary/65">{l.submittedBy}</span> },
-    { key: "submittedAt", header: "Submitted", sortable: true, sortValue: (l) => l.submittedAt, render: (l) => <span className="text-brand-secondary/55">{l.submittedAt}</span> },
-    { key: "status", header: "Status", sortable: true, sortValue: (l) => l.status, render: (l) => <StatusPill tone={LISTING_STATUS_TONE[l.status]}>{l.status.replace("_", " ")}</StatusPill> },
+    { key: "specs", header: "Type", render: (l) => <span className="text-xs text-brand-secondary/70">{specs(l) || "—"}</span> },
+    { key: "price", header: "Price", sortable: true, sortValue: (l) => l.pricePaise ?? 0, render: (l) => <span className="font-bold">{formatPaise(l.pricePaise)}</span> },
+    { key: "seller", header: "Seller", render: (l) => <UserLink id={l.sellerId} className="text-brand-secondary/65" /> },
     {
-      key: "actions", header: "Actions", render: (l) => (
-        <div className="flex flex-wrap gap-1.5">
-          {l.status === "pending_review" && (
-            <>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button size="sm" className="gap-1"><Check className="h-3.5 w-3.5" /> Approve</Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Approve this listing?</AlertDialogTitle>
-                    <AlertDialogDescription>It goes live immediately and becomes publicly visible.</AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => approve(l.id)}>Approve</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-              <Button size="sm" variant="destructive" onClick={() => setRejectingId(l.id)} className="gap-1"><X className="h-3.5 w-3.5" /> Reject</Button>
-            </>
-          )}
-          {l.status === "live" && (
-            <>
-              <Button size="sm" variant="outline" onClick={() => extend(l.id)} className="gap-1"><Clock className="h-3.5 w-3.5" /> Extend</Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button size="sm" variant="destructive" className="gap-1"><Trash2 className="h-3.5 w-3.5" /> Remove</Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Remove this listing?</AlertDialogTitle>
-                    <AlertDialogDescription>It's taken down from the marketplace immediately.</AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => remove(l.id)}>Remove</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </>
-          )}
-        </div>
-      ),
+      key: "submittedAt",
+      header: "Submitted",
+      sortable: true,
+      sortValue: (l) => l.submittedAt ?? l.updatedAt ?? l.createdAt,
+      render: (l) => <span className="whitespace-nowrap text-brand-secondary/55">{formatDateTime(l.submittedAt ?? l.updatedAt ?? l.createdAt)}</span>,
+    },
+    {
+      key: "status",
+      header: "Status",
+      render: (l) => <StatusPill tone={listingStatusTone(l.status)}>{listingStatusLabel(l.status)}</StatusPill>,
+    },
+    {
+      key: "actions",
+      header: "Actions",
+      render: (l) =>
+        l.status === "pending_review" ? <PendingListingButtons id={l._id} title={l.title || "this listing"} actions={actions} /> : null,
     },
   ]
 
   return (
-    <div className="space-y-4">
-      <FilterBar
-        filters={[{ key: "status", label: "Status", value: statusFilter, onChange: setStatusFilter, options: LISTING_STATUSES.map((s) => ({ label: s.replace("_", " "), value: s })) }]}
-      />
-      <DataTable columns={columns} rows={filtered} rowKey={(l) => l.id} defaultSortKey="submittedAt" defaultSortDirection="asc" />
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm text-brand-secondary/60">
+          Listings waiting for review, oldest first. Approving makes a listing visible to every buyer immediately.
+        </p>
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => refetch()} disabled={isFetching}>
+          <RotateCcw className={isFetching ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} /> Refresh
+        </Button>
+      </div>
 
-      <RejectionDialog
-        open={!!rejectingId}
-        onOpenChange={(o) => !o && setRejectingId(null)}
-        title="Reject this listing"
-        description="The submitter will see this reason and can correct & resubmit."
-        reason={reason}
-        onReasonChange={setReason}
-        onConfirm={confirmReject}
-        placeholder="e.g. Missing RERA registration number."
-      />
+      <QueryState isLoading={isLoading} error={error} onRetry={refetch} isFetching={isFetching}>
+        <DataTable
+          columns={columns}
+          rows={listings}
+          rowKey={(l) => l._id}
+          defaultSortKey="submittedAt"
+          defaultSortDirection="asc"
+          pageSize={10}
+          emptyLabel="The review queue is empty — no listings are waiting for a decision."
+        />
+      </QueryState>
 
-      <TotpStepUpDialog {...stepUp} />
+      <LiveListingTools actions={actions} />
     </div>
   )
 }
