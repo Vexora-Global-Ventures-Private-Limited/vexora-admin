@@ -46,9 +46,6 @@ const STATUS_TONE: Record<string, "danger" | "warning" | "success" | "neutral"> 
   dismissed: "neutral",
 }
 
-// The list returns resolvedAt/resolvedBy on closed reports (verified live),
-// though adminApi's type doesn't declare them.
-const resolvedAt = (r: AbuseReport) => (r as AbuseReport & { resolvedAt?: string }).resolvedAt
 
 const isClosed = (r: AbuseReport) => r.status === "resolved" || r.status === "dismissed"
 const isBreached = (r: AbuseReport) => !isClosed(r) && new Date(r.slaDueAt).getTime() < Date.now()
@@ -169,7 +166,7 @@ export default function AbusePage() {
         <div>
           <StatusPill tone={STATUS_TONE[r.status] ?? "neutral"}>{(r.status || "unknown").replace(/_/g, " ")}</StatusPill>
           {r.actionTaken && <div className="mt-0.5 text-[10px] text-brand-secondary/55">action: {r.actionTaken.replace(/_/g, " ")}</div>}
-          {resolvedAt(r) && <div className="mt-0.5 whitespace-nowrap text-[10px] text-brand-secondary/45">{formatDateTime(resolvedAt(r))}</div>}
+          {r.resolvedAt && <div className="mt-0.5 whitespace-nowrap text-[10px] text-brand-secondary/45">{formatDateTime(r.resolvedAt)}</div>}
           {r.resolutionNote && <div className="mt-0.5 line-clamp-2 max-w-[200px] text-[10px] text-brand-secondary/50" title={r.resolutionNote}>“{r.resolutionNote}”</div>}
         </div>
       ),

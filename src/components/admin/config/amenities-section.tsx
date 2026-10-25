@@ -57,7 +57,7 @@ export function AmenitiesSection() {
   )
 
   const toggle = async (a: Amenity) => {
-    if (busyId) return
+    if (busyId || stepUp.open) return
     setBusyId(a._id)
     await write(() => update({ id: a._id, body: { isActive: !a.isActive } }).unwrap(), {
       success: `${a.name} ${a.isActive ? "hidden" : "shown"}`,
@@ -158,7 +158,7 @@ function AmenityDialog({
   const [create, { isLoading: isCreating }] = useCreateAmenityMutation()
   const [update, { isLoading: isUpdating }] = useUpdateAmenityMutation()
   const { write, stepUp } = useDirectWrite()
-  const busy = isCreating || isUpdating
+  const busy = isCreating || isUpdating || stepUp.open
 
   const nameError = !isValidDisplayName(name)
     ? "2–60 characters."
@@ -166,13 +166,18 @@ function AmenityDialog({
       ? "An amenity with this name already exists."
       : null
   const iconError = ICON_PATTERN.test(icon) ? null : "Lowercase letters, digits, underscores (e.g. swimming_pool)."
-  const categoryError = category && !/^[a-z][a-z_ ]{1,29}$/i.test(category.trim()) ? "Letters only, up to 30." : null
+  const categoryError = category && !/^[a-z][a-z_ ]{1,29}$/i.test(category.trim()) ? "Letters, spaces or underscores; 2–30 characters." : null
   const invalid = !!nameError || !!iconError || !!categoryError
+  const nothingChanged =
+    !!amenity &&
+    name.trim() === amenity.name &&
+    icon === amenity.icon &&
+    category.trim().toLowerCase() === (amenity.category ?? "").toLowerCase()
 
   const submit = () => {
     setTouched(true)
-    if (invalid || busy) return
-    const body = { name: name.trim(), icon, ...(category.trim() ? { category: category.trim().toLowerCase() } : {}) }
+    if (invalid || busy || nothingChanged) return
+    const body = { name: name.trim().replace(/\s+/g, " "), icon, ...(category.trim() ? { category: category.trim().toLowerCase() } : {}) }
     void write(
       () => (amenity ? update({ id: amenity._id, body }).unwrap() : create({ ...body, isActive: true }).unwrap()),
       { success: amenity ? `${body.name} updated` : `${body.name} added`, error: "Couldn't save amenity", after: onClose },
@@ -214,6 +219,9 @@ function AmenityDialog({
             <div>
               <Label htmlFor="am-category">Category (optional)</Label>
               <Input id="am-category" value={category} list="am-categories" maxLength={30} onChange={(e) => setCategory(e.target.value)} aria-invalid={touched && !!categoryError} className="mt-1" />
+              {amenity?.category && !category.trim() && (
+                <p className="mt-1 text-[11px] text-amber-700">A category can&apos;t be removed once set — leaving this empty keeps “{amenity.category}”.</p>
+              )}
               <datalist id="am-categories">
                 {categories.map((c) => (
                   <option key={c} value={c} />
@@ -224,7 +232,7 @@ function AmenityDialog({
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-            <Button onClick={submit} disabled={busy} className="btn-gold">{busy ? "Saving…" : amenity ? "Save" : "Add"}</Button>
+            <Button onClick={submit} disabled={busy || nothingChanged} className="btn-gold">{busy ? "Saving…" : amenity ? "Save" : "Add"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

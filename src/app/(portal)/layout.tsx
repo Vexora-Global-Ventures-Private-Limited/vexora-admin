@@ -10,21 +10,33 @@ import { AdminShell, type AdminNavItem } from "@/components/admin/admin-shell"
 import { useAdminGuard } from "@/lib/use-admin-guard"
 import { useAdminAuth } from "@/hooks/use-admin-auth"
 import { useGetDashboardQuery } from "@/store/api/adminApi"
+import type { AdminRole } from "@/lib/admin-session"
 import { ROUTES } from "@/lib/routes"
+
+// `roles` mirrors the backend's documented requireRole() guards (06-API.md /
+// FRONTEND-ADMIN-INTEGRATION-ROADMAP.md) — moderation queues are
+// super_admin + moderator. Screens whose guard isn't documented stay visible
+// to every role; their pages already handle a 403 ADMIN_FORBIDDEN. Only
+// super_admin exists today, so this matters once ops/finance/moderator do.
+const MODERATION_ROLES: AdminRole[] = ["moderator"]
 
 const NAV_ITEMS: AdminNavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, href: ROUTES.dashboard },
   { id: "users", label: "Users", icon: Users, href: ROUTES.users },
   { id: "payment-ops", label: "Payment ops", icon: Wallet, href: ROUTES.paymentOps },
-  { id: "listings", label: "Listings", icon: Building2, href: ROUTES.listings },
+  { id: "listings", label: "Listings", icon: Building2, href: ROUTES.listings, roles: MODERATION_ROLES },
   { id: "kyc", label: "KYC & badges", icon: BadgeCheck, href: ROUTES.kyc },
-  { id: "ads", label: "Ad approval", icon: Megaphone, href: ROUTES.ads },
+  { id: "ads", label: "Ad approval", icon: Megaphone, href: ROUTES.ads, roles: MODERATION_ROLES },
   { id: "templates", label: "Templates", icon: MessageSquareText, href: ROUTES.templates },
   { id: "reports", label: "Reports", icon: BarChart3, href: ROUTES.reports },
   { id: "config", label: "Platform config", icon: SlidersHorizontal, href: ROUTES.config },
-  { id: "abuse", label: "Abuse queue", icon: ShieldAlert, href: ROUTES.abuse },
+  { id: "abuse", label: "Abuse queue", icon: ShieldAlert, href: ROUTES.abuse, roles: MODERATION_ROLES },
   { id: "payments", label: "Payments & audit", icon: Receipt, href: ROUTES.payments },
 ]
+
+function canSee(item: AdminNavItem, role: AdminRole) {
+  return role === "super_admin" || !item.roles || item.roles.includes(role)
+}
 
 const TOPBAR_SUBTITLE: Record<string, string> = {
   dashboard: "Platform-wide health & pending approvals — G1",
@@ -67,13 +79,17 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
     ads: dashboard?.queues.ads ?? 0,
     abuse: dashboard?.abuse.open ?? 0,
   }
-  const navWithBadges = NAV_ITEMS.map((item) => ({ ...item, badge: badges[item.id] || undefined }))
+  const navWithBadges = NAV_ITEMS.filter((item) => !adminUser || canSee(item, adminUser.role)).map((item) => ({
+    ...item,
+    badge: badges[item.id] || undefined,
+  }))
 
   if (!ready || !elevated || !adminUser) return null
 
   return (
     <AdminShell
       navItems={navWithBadges}
+      activeId={activeItem?.id}
       user={adminUser}
       onSignOut={logout}
       topbarTitle={activeItem?.label ?? "Dashboard"}

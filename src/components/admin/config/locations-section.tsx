@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import { Pencil, Plus, Search } from "lucide-react"
+import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -31,8 +32,17 @@ const ACTIVATIONS: { value: LocationActivation; label: string; tone: "success" |
 ]
 const activationOf = (v: LocationActivation) => ACTIVATIONS.find((a) => a.value === v) ?? ACTIVATIONS[2]
 
-function parseAliases(text: string) {
-  return Array.from(new Set(text.split(",").map((a) => a.trim()).filter(Boolean)))
+/** Comma-separated aliases → unique list (case-insensitive), minus any that just repeat the name. */
+function parseAliases(text: string, name = "") {
+  const seen = new Set([name.trim().toLowerCase()])
+  const out: string[] = []
+  for (const raw of text.split(",")) {
+    const a = raw.trim().replace(/\s+/g, " ")
+    if (!a || seen.has(a.toLowerCase())) continue
+    seen.add(a.toLowerCase())
+    out.push(a)
+  }
+  return out
 }
 
 /**
@@ -52,8 +62,8 @@ export function LocationsSection() {
     return [...(locations ?? [])]
       .filter((l) => typeFilter === "all" || l.type === typeFilter)
       .filter((l) => activationFilter === "all" || l.activation === activationFilter)
-      .filter((l) => !q || l.displayPath.toLowerCase().includes(q) || l.aliases.some((a) => a.toLowerCase().includes(q)))
-      .sort((a, b) => TYPE_RANK[a.type] - TYPE_RANK[b.type] || a.displayPath.localeCompare(b.displayPath))
+      .filter((l) => !q || (l.displayPath ?? l.name).toLowerCase().includes(q) || (l.aliases ?? []).some((a) => a.toLowerCase().includes(q)))
+      .sort((a, b) => TYPE_RANK[a.type] - TYPE_RANK[b.type] || (a.displayPath ?? a.name).localeCompare(b.displayPath ?? b.name))
   }, [locations, query, typeFilter, activationFilter])
 
   const columns: DataTableColumn<AdminLocation>[] = [
@@ -70,7 +80,7 @@ export function LocationsSection() {
       ),
     },
     { key: "type", header: "Type", sortable: true, sortValue: (l) => TYPE_RANK[l.type], render: (l) => <span className="capitalize">{l.type}</span> },
-    { key: "aliases", header: "Aliases", render: (l) => <span className="text-xs text-brand-secondary/70">{l.aliases.join(", ") || "—"}</span> },
+    { key: "aliases", header: "Aliases", render: (l) => <span className="text-xs text-brand-secondary/70">{(l.aliases ?? []).join(", ") || "—"}</span> },
     {
       key: "activation",
       header: "On the website",
@@ -167,19 +177,19 @@ function LocationDialog({ location, all, onClose }: { location?: AdminLocation; 
   const [type, setType] = useState<LocationType>(location?.type ?? "city")
   const [parentId, setParentId] = useState<string>(location?.parentId ?? "")
   const [activation, setActivation] = useState<LocationActivation>(location?.activation ?? "active")
-  const [aliases, setAliases] = useState(location?.aliases.join(", ") ?? "")
+  const [aliases, setAliases] = useState((location?.aliases ?? []).join(", "))
   const [touched, setTouched] = useState(false)
   const [create, { isLoading: isCreating }] = useCreateLocationMutation()
   const [update, { isLoading: isUpdating }] = useUpdateLocationMutation()
   const { write, stepUp } = useDirectWrite()
-  const busy = isCreating || isUpdating
+  const busy = isCreating || isUpdating || stepUp.open
 
   // A parent must sit higher in the hierarchy (country > state > district > city > locality).
   const parentOptions = all
     .filter((l) => TYPE_RANK[l.type] < TYPE_RANK[type] && l._id !== location?._id)
     .sort((a, b) => a.displayPath.localeCompare(b.displayPath))
   const parent = all.find((l) => l._id === parentId)
-  const aliasList = parseAliases(aliases)
+  const aliasList = parseAliases(aliases, name)
   const siblings = all.filter((l) => l._id !== location?._id && (l.parentId ?? "") === (location ? location.parentId ?? "" : parentId))
 
   const nameError = !isValidDisplayName(name)
@@ -190,13 +200,27 @@ function LocationDialog({ location, all, onClose }: { location?: AdminLocation; 
   const parentError = !location && type !== "country" && !parentId ? "Pick where this sits in the hierarchy." : null
   const aliasError = aliasList.some((a) => !isValidDisplayName(a)) ? "Each alias: 2–60 characters, comma-separated." : null
   const invalid = !!nameError || !!parentError || !!aliasError
+  const nothingChanged =
+    !!location &&
+    name.trim() === location.name &&
+    activation === location.activation &&
+    JSON.stringify(aliasList) === JSON.stringify(location.aliases ?? [])
 
   const submit = () => {
     setTouched(true)
-    if (invalid || busy) return
+    if (invalid || busy || nothingChanged) return
     const action = location
-      ? () => update({ id: location._id, body: { name: name.trim(), activation, aliases: aliasList } }).unwrap()
-      : () => create({ name: name.trim(), type, ...(parentId ? { parentId } : {}), aliases: aliasList }).unwrap()
+      ? () => update({ id: location._id, body: { name: name.trim().replace(/\s+/g, " "), activation, aliases: aliasList } }).unwrap()
+      : async () => {
+          const created = await create({ name: name.trim().replace(/\s+/g, " "), type, ...(parentId ? { parentId } : {}), aliases: aliasList }).unwrap()
+          // POST takes no activation — new places start in whatever state the
+          // backend defaults to. Say so when it isn't live on the website yet.
+          if (created?.activation && created.activation !== "active") {
+            toast.info(`${created.name} isn't on the website yet`, {
+              description: `It was created as "${activationOf(created.activation).label}". Edit it and set "On the website" to Active to show it in vexora-web's city pickers.`,
+            })
+          }
+        }
     void write(action, {
       success: location ? `${name.trim()} updated` : `${name.trim()} added`,
       error: "Couldn't save location",
@@ -295,7 +319,7 @@ function LocationDialog({ location, all, onClose }: { location?: AdminLocation; 
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
-            <Button onClick={submit} disabled={busy} className="btn-gold">{busy ? "Saving…" : location ? "Save" : "Add location"}</Button>
+            <Button onClick={submit} disabled={busy || nothingChanged} className="btn-gold">{busy ? "Saving…" : location ? "Save" : "Add location"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

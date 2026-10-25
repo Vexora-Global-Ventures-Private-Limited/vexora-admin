@@ -122,6 +122,10 @@ export type AbuseReport = {
   slaDueAt: string
   actionTaken?: AbuseAction
   resolutionNote?: string
+  /** Set once the report is closed (verified live). */
+  resolvedAt?: string
+  /** Admin id that closed it. */
+  resolvedBy?: string
   createdAt: string
   updatedAt: string
 }

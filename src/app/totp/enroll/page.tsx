@@ -170,7 +170,6 @@ export default function TotpEnrollPage() {
 
             <div className="mt-5 flex justify-center">
               {qrDataUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- a generated data: URL, nothing for next/image to optimise
                 <img src={qrDataUrl} alt="QR code to add Vexora Admin to your authenticator app" className="h-[200px] w-[200px] border border-brand-border-light bg-white" />
               ) : (
                 <div className="grid h-[200px] w-[200px] place-items-center border border-brand-border-light px-4 text-xs text-brand-secondary/50">
