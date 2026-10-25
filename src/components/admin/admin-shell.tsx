@@ -22,7 +22,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { ADMIN_ROLE_NAME, type AdminUser } from "@/lib/admin-session"
+import { ADMIN_ROLE_NAME, type AdminRole, type AdminUser } from "@/lib/admin-session"
 
 export type AdminNavItem = {
   id: string
@@ -30,6 +30,8 @@ export type AdminNavItem = {
   icon: LucideIcon
   href: string
   badge?: string | number
+  /** Roles allowed to see this item (super_admin always can). Omit = every admin. */
+  roles?: AdminRole[]
 }
 
 /** Nav link that collapses the mobile sidebar (Sheet) on selection — desktop
@@ -39,7 +41,7 @@ function NavLink({ item, isActive }: { item: AdminNavItem; isActive: boolean }) 
   return (
     <SidebarMenuButton asChild isActive={isActive} tooltip={item.label}>
       <Link href={item.href} onClick={() => isMobile && setOpenMobile(false)}>
-        <item.icon className="h-4 w-4" />
+        <item.icon aria-hidden className="h-4 w-4" />
         <span>{item.label}</span>
       </Link>
     </SidebarMenuButton>
@@ -48,6 +50,8 @@ function NavLink({ item, isActive }: { item: AdminNavItem; isActive: boolean }) 
 
 type AdminShellProps = {
   navItems: AdminNavItem[]
+  /** Which nav item is current — the layout decides (e.g. /audit belongs to "Payments & audit"). */
+  activeId?: string
   user: AdminUser
   onSignOut: () => void
   topbarTitle: string
@@ -58,7 +62,7 @@ type AdminShellProps = {
 /** Sidebar + topbar chrome for the (portal) route group — mirrors VXP's
  *  DashboardShell, but navigates real routes (Link) instead of a `?tab=`
  *  query param, matching the docs' apps/admin route tree (07-Frontend.md §2.2). */
-export function AdminShell({ navItems, user, onSignOut, topbarTitle, topbarSubtitle, children }: AdminShellProps) {
+export function AdminShell({ navItems, activeId, user, onSignOut, topbarTitle, topbarSubtitle, children }: AdminShellProps) {
   const pathname = usePathname()
 
   return (
@@ -79,13 +83,15 @@ export function AdminShell({ navItems, user, onSignOut, topbarTitle, topbarSubti
         </SidebarHeader>
 
         <SidebarContent>
-          <SidebarGroup>
+          <SidebarGroup role="navigation" aria-label="Admin sections">
             <SidebarGroupContent>
               <SidebarMenu>
                 {navItems.map((item) => (
                   <SidebarMenuItem key={item.id}>
-                    <NavLink item={item} isActive={pathname.startsWith(item.href)} />
-                    {item.badge != null && <SidebarMenuBadge>{item.badge}</SidebarMenuBadge>}
+                    <NavLink item={item} isActive={activeId ? activeId === item.id : pathname.startsWith(item.href)} />
+                    {item.badge != null && (
+                      <SidebarMenuBadge aria-label={`${item.badge} pending`}>{item.badge}</SidebarMenuBadge>
+                    )}
                   </SidebarMenuItem>
                 ))}
               </SidebarMenu>
@@ -98,15 +104,15 @@ export function AdminShell({ navItems, user, onSignOut, topbarTitle, topbarSubti
             <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-ink-black to-brand-secondary text-[10px] font-bold text-brand-primary">
               {user.initials}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0" title={user.email}>
               <div className="truncate text-xs font-bold text-brand-secondary">{user.name}</div>
               <div className="truncate text-[10px] text-brand-secondary/55">{ADMIN_ROLE_NAME[user.role]}</div>
             </div>
           </div>
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton onClick={onSignOut} tooltip="Sign out">
-                <LogOut className="h-4 w-4" />
+              <SidebarMenuButton onClick={onSignOut} tooltip={`Sign out ${user.email}`}>
+                <LogOut aria-hidden className="h-4 w-4" />
                 <span>Sign out</span>
               </SidebarMenuButton>
             </SidebarMenuItem>

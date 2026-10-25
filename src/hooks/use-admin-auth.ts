@@ -12,6 +12,8 @@ import {
   clearOtpauthUrl,
 } from "@/lib/admin-tokens"
 import { useAdminSession, type AdminUser } from "@/lib/admin-session"
+import { baseApi } from "@/store/api/baseApi"
+import { useAppDispatch } from "@/store/hooks"
 
 /**
  * admin_auth.json's `admin` object is just `{ id, email, role }` — no display
@@ -42,6 +44,7 @@ export function useAdminAuth() {
   const setAdminUser = useAdminSession((s) => s.login)
   const clearAdminUser = useAdminSession((s) => s.logout)
   const markTotpVerified = useAdminSession((s) => s.markTotpVerified)
+  const dispatch = useAppDispatch()
   const [loginMutation, loginState] = useLoginMutation()
   const [totpEnrollMutation, enrollState] = useTotpEnrollMutation()
   const [totpVerifyMutation, verifyState] = useTotpVerifyMutation()
@@ -51,11 +54,18 @@ export function useAdminAuth() {
   const login = useCallback(
     async (email: string, password: string) => {
       const result = await loginMutation({ email, password }).unwrap()
+      // A new sign-in replaces whatever session this browser had — never
+      // leave the previous account's token/cache alive behind a half-done
+      // login (it may be a different admin at the same desk).
+      clearAccessToken()
+      clearOtpauthUrl()
+      clearAdminUser()
+      dispatch(baseApi.util.resetApiState())
       setTempToken(result.data.tempToken)
       if (result.data.otpauthUrl) setOtpauthUrl(result.data.otpauthUrl)
       return result.data
     },
-    [loginMutation],
+    [loginMutation, clearAdminUser, dispatch],
   )
 
   // Step 2a — first-ever login only. Verifies the first TOTP code, stores
@@ -111,7 +121,10 @@ export function useAdminAuth() {
     clearTempToken()
     clearOtpauthUrl()
     clearAdminUser()
-  }, [clearAdminUser])
+    // Drop every cached admin response so nothing from this session is
+    // still in memory for whoever signs in next on this tab.
+    dispatch(baseApi.util.resetApiState())
+  }, [clearAdminUser, dispatch])
 
   return {
     login,

@@ -3,7 +3,7 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAdminSession } from "@/lib/admin-session"
-import { getAccessToken } from "@/lib/admin-tokens"
+import { clearAccessToken, getAccessToken, isAccessTokenExpired } from "@/lib/admin-tokens"
 import { ROUTES } from "@/lib/routes"
 
 /**
@@ -14,23 +14,33 @@ import { ROUTES } from "@/lib/routes"
  * survive in localStorage after the accessToken it was minted with expires
  * or gets cleared (e.g. baseApi's 401 handler clearing just the token via a
  * hard redirect that raced this check) — the token is the actual session.
+ *
+ * An expired token (8h, no refresh) counts as no session: without this the
+ * portal rendered normally and only bounced on the first API 401.
  */
 export function useAdminGuard() {
   const adminUser = useAdminSession((s) => s.adminUser)
   const hasHydrated = useAdminSession((s) => s.hasHydrated)
   const totpVerifiedAt = useAdminSession((s) => s.totpVerifiedAt)
+  const logout = useAdminSession((s) => s.logout)
   const router = useRouter()
   const ready = useAdminSession.persist ? hasHydrated : true
-  const hasSession = ready && !!adminUser && !!getAccessToken()
+  const token = ready ? getAccessToken() : null
+  const expired = !!token && isAccessTokenExpired(token)
+  const hasSession = ready && !!adminUser && !!token && !expired
 
   useEffect(() => {
     if (!ready) return
-    if (!adminUser || !getAccessToken()) {
+    if (expired) {
+      clearAccessToken()
+      logout()
+      router.replace(`${ROUTES.login}?session=expired`)
+    } else if (!adminUser || !getAccessToken()) {
       router.replace(ROUTES.login)
     } else if (!totpVerifiedAt) {
       router.replace(ROUTES.totpVerify)
     }
-  }, [ready, adminUser, totpVerifiedAt, router])
+  }, [ready, expired, adminUser, totpVerifiedAt, router, logout])
 
   const elevated = hasSession && !!totpVerifiedAt
   return { ready, adminUser, elevated }

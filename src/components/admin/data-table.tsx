@@ -31,6 +31,10 @@ type DataTableProps<T> = {
   /** Column key to sort by initially (must be a sortable column). */
   defaultSortKey?: string
   defaultSortDirection?: SortDirection
+  /** Shows skeleton rows instead of the empty state while the first fetch runs. */
+  loading?: boolean
+  /** Accessible name for the table. */
+  ariaLabel?: string
 }
 
 export function DataTable<T>({
@@ -42,6 +46,8 @@ export function DataTable<T>({
   pageSize = 5,
   defaultSortKey,
   defaultSortDirection = "asc",
+  loading,
+  ariaLabel,
 }: DataTableProps<T>) {
   const [sortKey, setSortKey] = useState<string | undefined>(defaultSortKey)
   const [sortDirection, setSortDirection] = useState<SortDirection>(defaultSortDirection)
@@ -72,6 +78,16 @@ export function DataTable<T>({
     }
   }
 
+  if (loading && rows.length === 0) {
+    return (
+      <div className="space-y-2 border border-brand-border bg-card p-4" aria-busy="true" aria-label="Loading">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-8 w-full animate-pulse bg-brand-tertiary/70" />
+        ))}
+      </div>
+    )
+  }
+
   if (rows.length === 0) {
     return (
       <div className="border border-brand-border bg-card p-8 text-center text-sm text-brand-muted-foreground">
@@ -81,13 +97,23 @@ export function DataTable<T>({
   }
 
   return (
-    <div className="overflow-x-auto border border-brand-border bg-card">
-      <Table>
+    // Focusable scroll region: on narrow screens the table scrolls sideways,
+    // and keyboard users need to be able to reach the hidden columns too.
+    <div
+      className="overflow-x-auto border border-brand-border bg-card focus-visible:outline-2 focus-visible:outline-brand-primary"
+      tabIndex={0}
+      role="region"
+      aria-label={ariaLabel ? `${ariaLabel} (scrollable)` : "Table (scrollable)"}
+    >
+      <Table aria-label={ariaLabel}>
         <TableHeader>
           <TableRow className="border-brand-border hover:bg-transparent">
             {columns.map((col) => (
               <TableHead
                 key={col.key}
+                aria-sort={
+                  col.sortable && sortKey === col.key ? (sortDirection === "asc" ? "ascending" : "descending") : undefined
+                }
                 className={cn("text-[11px] font-semibold uppercase tracking-wide text-brand-muted-foreground", col.className)}
               >
                 {col.sortable && col.sortValue ? (

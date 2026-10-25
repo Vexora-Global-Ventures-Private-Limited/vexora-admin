@@ -1,157 +1,96 @@
 "use client"
 
-import { use, useState } from "react"
-import { toast } from "sonner"
-import { Check, X, Clock, Trash2 } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
+import { use } from "react"
+import { useRouter } from "next/navigation"
 import { StatusPill } from "@/components/admin/status-pill"
-import { TotpStepUpDialog } from "@/components/admin/totp-step-up-dialog"
-import { RejectionDialog } from "@/components/admin/rejection-dialog"
 import { DetailBackLink, DetailCard } from "@/components/admin/detail-page-shell"
-import { NotFoundCard } from "@/components/admin/not-found-card"
-import { useStepUp } from "@/lib/use-step-up"
-import { useAdminDataStore } from "@/lib/admin-data-store"
-import { LISTING_STATUS_TONE } from "@/lib/listing-status"
+import { PendingListingButtons, LiveListingTools, useListingActions } from "@/components/admin/moderation/listing-actions"
+import { Fact, QueryState, ShortId, UserLink, formatDateTime, formatPaise, isObjectId } from "@/components/admin/moderation/shared"
+import { listingStatusLabel, listingStatusTone } from "@/lib/listing-status"
+import { useGetListingQueueQuery } from "@/store/api/adminApi"
 import { ROUTES } from "@/lib/routes"
 
+/**
+ * There's no admin "get listing by id" endpoint, so a listing's review card
+ * is derived from the moderation queue. A listing that isn't in the queue
+ * (already decided, or a live listing opened by id) gets the live-listing
+ * tools instead — extend/remove work on any listing id.
+ */
 export default function ListingDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
-  const initial = useAdminDataStore((s) => s.listings.find((l) => l.id === id))
-  const approveListing = useAdminDataStore((s) => s.approveListing)
-  const rejectListing = useAdminDataStore((s) => s.rejectListing)
-  const extendListing = useAdminDataStore((s) => s.extendListing)
-  const removeListing = useAdminDataStore((s) => s.removeListing)
-  const [rejecting, setRejecting] = useState(false)
-  const [reason, setReason] = useState("")
-  const stepUp = useStepUp()
+  const router = useRouter()
+  const { data, isLoading, isFetching, error, refetch } = useGetListingQueueQuery(undefined, { refetchOnMountOrArgChange: true })
+  // Once a pending listing is approved/rejected it leaves the queue — go back to it.
+  const actions = useListingActions((action) => {
+    if (action === "approved" || action === "rejected") router.push(ROUTES.listings)
+  })
+  const listing = data?.find((l) => l._id === id)
 
-  if (!initial) {
-    return <NotFoundCard label="Listing" id={id} />
+  if (!isObjectId(id)) {
+    return (
+      <div className="max-w-2xl space-y-6">
+        <DetailBackLink href={ROUTES.listings} label="Listing queue" />
+        <DetailCard>
+          <p className="text-sm text-brand-secondary/70">“{id}” isn&apos;t a valid listing id.</p>
+        </DetailCard>
+      </div>
+    )
   }
-
-  const approve = () => {
-    approveListing(id)
-    toast.success("Listing approved — now live")
-  }
-  const confirmReject = () => {
-    rejectListing(id, reason)
-    toast.warning("Listing rejected", { description: "Audit-logged." })
-    setRejecting(false)
-    setReason("")
-  }
-  const extend = () =>
-    stepUp.run(() => {
-      const newExpiresAt = extendListing(id, 30)
-      toast.success(`Listing extended to ${newExpiresAt}`, { description: "Audit-logged." })
-    })
-  const remove = () =>
-    stepUp.run(() => {
-      removeListing(id)
-      toast.warning("Listing removed from marketplace", { description: "Audit-logged." })
-    })
 
   return (
     <div className="max-w-2xl space-y-6">
       <DetailBackLink href={ROUTES.listings} label="Listing queue" />
 
-      <DetailCard>
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="font-serif text-xl font-bold text-brand-secondary">{initial.title}</div>
-            <div className="mt-1 text-sm text-brand-secondary/55">{initial.location}</div>
-          </div>
-          <StatusPill tone={LISTING_STATUS_TONE[initial.status]}>{initial.status.replace("_", " ")}</StatusPill>
-        </div>
-
-        <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
-          <div className="bg-brand-tertiary/40 p-3">
-            <div className="text-[10px] uppercase tracking-wide text-brand-secondary/50">Submitted by</div>
-            <div className="font-bold text-brand-secondary">{initial.submittedBy}</div>
-          </div>
-          <div className="bg-brand-tertiary/40 p-3">
-            <div className="text-[10px] uppercase tracking-wide text-brand-secondary/50">Submitted at</div>
-            <div className="font-bold text-brand-secondary">{initial.submittedAt}</div>
-          </div>
-          {initial.expiresAt && (
-            <div className="bg-brand-tertiary/40 p-3">
-              <div className="text-[10px] uppercase tracking-wide text-brand-secondary/50">Expires</div>
-              <div className="font-bold text-brand-secondary">{initial.expiresAt}</div>
+      <QueryState isLoading={isLoading} error={error} onRetry={refetch} isFetching={isFetching} rows={3}>
+        {listing ? (
+          <DetailCard>
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="break-words font-serif text-xl font-bold text-brand-secondary">{listing.title || "Untitled listing"}</div>
+                <div className="mt-1 text-sm text-brand-secondary/55">
+                  {[listing.locality, listing.city, listing.state, listing.pincode].filter(Boolean).join(", ") || "Location not given"}
+                </div>
+              </div>
+              <StatusPill tone={listingStatusTone(listing.status)}>{listingStatusLabel(listing.status)}</StatusPill>
             </div>
-          )}
-        </div>
 
-        {initial.rejectionReason && (
-          <div className="mt-4 bg-red-50 p-3 text-xs text-red-700">
-            <b>Rejection reason:</b> {initial.rejectionReason}
-          </div>
+            <div className="mt-5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
+              <Fact label="Price" value={formatPaise(listing.pricePaise)} />
+              <Fact label="Type" value={listing.propertyType || "—"} />
+              <Fact label="Purpose" value={listing.purpose === "rent" ? "Rent" : listing.purpose === "sale" ? "Sale" : listing.purpose || "—"} />
+              <Fact label="BHK" value={listing.bhk ?? "—"} />
+              <Fact label="Area" value={listing.areaSqft ? `${listing.areaSqft.toLocaleString("en-IN")} sq.ft` : "—"} />
+              <Fact label="Seller" value={<UserLink id={listing.sellerId} />} />
+              <Fact label="Submitted" value={formatDateTime(listing.submittedAt ?? listing.updatedAt)} />
+              <Fact label="Created" value={formatDateTime(listing.createdAt)} />
+              <Fact label="Listing id" value={<ShortId id={listing._id} />} />
+            </div>
+
+            {listing.description && (
+              <div className="mt-4">
+                <div className="text-[10px] uppercase tracking-wide text-brand-secondary/50">Description</div>
+                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-brand-secondary/80">{listing.description}</p>
+              </div>
+            )}
+
+            {listing.status === "pending_review" && (
+              <div className="mt-5">
+                <PendingListingButtons id={listing._id} title={listing.title || "this listing"} actions={actions} size="default" />
+              </div>
+            )}
+          </DetailCard>
+        ) : (
+          <DetailCard>
+            <div className="font-serif text-lg font-bold text-brand-secondary">Not in the review queue</div>
+            <p className="mt-1 text-sm text-brand-secondary/65">
+              Listing <span className="font-mono text-xs">{id}</span> isn&apos;t waiting for review — it was already decided, withdrawn, or
+              it&apos;s a live listing. If it&apos;s live, you can still extend or remove it below.
+            </p>
+          </DetailCard>
         )}
+      </QueryState>
 
-        <div className="mt-5 flex flex-wrap gap-2">
-          {initial.status === "pending_review" && (
-            <>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button className="btn-gold gap-1.5"><Check className="h-4 w-4" /> Approve listing</Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Approve this listing?</AlertDialogTitle>
-                    <AlertDialogDescription>It goes live immediately and becomes publicly visible.</AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={approve}>Approve</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-              <Button variant="destructive" className="gap-1.5" onClick={() => setRejecting(true)}><X className="h-4 w-4" /> Reject listing</Button>
-            </>
-          )}
-          {initial.status === "live" && (
-            <>
-              <Button variant="outline" className="gap-1.5" onClick={extend}><Clock className="h-4 w-4" /> Extend validity</Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive" className="gap-1.5"><Trash2 className="h-4 w-4" /> Remove listing</Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Remove this listing?</AlertDialogTitle>
-                    <AlertDialogDescription>It's taken down from the marketplace immediately.</AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <AlertDialogAction onClick={remove}>Remove</AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </>
-          )}
-        </div>
-      </DetailCard>
-
-      <RejectionDialog
-        open={rejecting}
-        onOpenChange={setRejecting}
-        title="Reject this listing"
-        description="The submitter will see this reason and can correct & resubmit."
-        reason={reason}
-        onReasonChange={setReason}
-        onConfirm={confirmReject}
-        placeholder="e.g. Missing RERA registration number."
-      />
-      <TotpStepUpDialog {...stepUp} />
+      {!isLoading && !error && (!listing || listing.status !== "pending_review") && <LiveListingTools actions={actions} presetId={id} />}
     </div>
   )
 }

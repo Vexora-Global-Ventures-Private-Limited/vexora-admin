@@ -29,3 +29,33 @@ function getErrorEnvelope(error: unknown): { code?: unknown; message?: unknown }
   if (!inner || typeof inner !== "object") return undefined
   return inner as { code?: unknown; message?: unknown }
 }
+
+const AUTH_ERROR_COPY: Record<string, string> = {
+  ADMIN_AUTH_FAILED: "Invalid email or password.",
+  ADMIN_INACTIVE: "This admin account has been deactivated. Contact a super admin.",
+  TOTP_INVALID: "That code isn't valid — codes change every 30 seconds, so enter the current one.",
+  TEMP_TOKEN_INVALID: "That sign-in attempt expired — please sign in again.",
+  RATE_LIMITED: "Too many attempts — wait a few minutes before trying again.",
+  VALIDATION_ERROR: "Please check what you entered and try again.",
+}
+
+/**
+ * One user-facing sentence for any error from the auth screens / step-up
+ * dialog: known codes get fixed copy, a network failure (RTK's FETCH_ERROR /
+ * TIMEOUT_ERROR) gets its own message instead of "invalid code", and an
+ * Error thrown by our own hooks keeps its message.
+ */
+export function describeAuthError(error: unknown, invalidCodeOverride?: string): string {
+  if (error && typeof error === "object" && "status" in error) {
+    const status = (error as { status: unknown }).status
+    if (status === "FETCH_ERROR" || status === "TIMEOUT_ERROR") {
+      return "Couldn't reach the server — check your connection and try again."
+    }
+    if (status === 429) return AUTH_ERROR_COPY.RATE_LIMITED
+  }
+  const code = getApiErrorCode(error)
+  if (code === "TOTP_INVALID" && invalidCodeOverride) return invalidCodeOverride
+  if (code && AUTH_ERROR_COPY[code]) return AUTH_ERROR_COPY[code]
+  if (error instanceof Error && error.message) return error.message
+  return getApiErrorMessage(error) ?? "Something went wrong — please try again."
+}
