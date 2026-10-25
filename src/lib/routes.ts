@@ -1,6 +1,7 @@
 export const ROUTES = {
   login: "/login",
   totpVerify: "/totp/verify",
+  totpEnroll: "/totp/enroll",
 
   dashboard: "/dashboard",
 

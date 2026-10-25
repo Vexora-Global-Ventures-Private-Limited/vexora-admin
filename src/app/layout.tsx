@@ -4,6 +4,7 @@ import "./globals.css"
 import { ThemeProvider } from "@/components/theme-provider"
 import { Toaster } from "@/components/ui/sonner"
 import { AdminSessionHydrator } from "@/components/admin/session-hydrator"
+import { ReduxProvider } from "@/store/provider"
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -42,6 +43,10 @@ export const metadata: Metadata = {
   title: "VXA — Vexora Admin",
   description: "Vexora operations console — approve, verify, publish, monitor.",
   robots: { index: false, follow: false, nocache: true },
+  // The console ships its own light/dark theme. Without this, the Dark
+  // Reader extension rewrites inline styles before React hydrates and every
+  // page logs a hydration-mismatch error in dev.
+  other: { "darkreader-lock": "true" },
 }
 
 export default function RootLayout({
@@ -56,9 +61,11 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} ${playfair.variable} ${inter.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable} antialiased bg-brand-tertiary text-brand-secondary min-h-screen font-sans`}
       >
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
-          <AdminSessionHydrator />
-          {children}
-          <Toaster />
+          <ReduxProvider>
+            <AdminSessionHydrator />
+            {children}
+            <Toaster />
+          </ReduxProvider>
         </ThemeProvider>
       </body>
     </html>

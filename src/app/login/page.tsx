@@ -1,40 +1,79 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useEffect, useId, useRef, useState, useSyncExternalStore, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
-import { Lock, Mail, ArrowRight, ShieldCheck, AlertCircle } from "lucide-react"
-import { useAdminSession, superAdminUser, SUPERADMIN_CREDENTIALS } from "@/lib/admin-session"
+import { Lock, Mail, ArrowRight, ShieldCheck, AlertCircle, Info } from "lucide-react"
+import { useAdminAuth } from "@/hooks/use-admin-auth"
+import { describeAuthError } from "@/lib/api-error"
+import { useAdminSession } from "@/lib/admin-session"
+import { getAccessToken, isAccessTokenExpired } from "@/lib/admin-tokens"
 import { ROUTES } from "@/lib/routes"
 
+type Notice = "attempt-expired" | "session-expired" | null
+
+const noopSubscribe = () => () => {}
+
+/** Why the admin landed back here: ?expired=1 (10-min tempToken died mid-login) or ?session=expired (8h session ended). */
+function readNotice(): Notice {
+  const params = new URLSearchParams(window.location.search)
+  if (params.get("session") === "expired") return "session-expired"
+  if (params.get("expired") === "1") return "attempt-expired"
+  return null
+}
+
 export default function LoginPage() {
-  const login = useAdminSession((s) => s.login)
+  const { login, isLoggingIn } = useAdminAuth()
   const router = useRouter()
-  // Prefilled for easy local sign-in — remove once real auth lands.
-  const [email, setEmail] = useState(SUPERADMIN_CREDENTIALS.email)
-  const [password, setPassword] = useState(SUPERADMIN_CREDENTIALS.password)
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
   const [error, setError] = useState("")
-  const [submitting, setSubmitting] = useState(false)
+  const [noticeDismissed, setNoticeDismissed] = useState(false)
+  const inFlight = useRef(false)
+  const ids = useId()
 
-  // Mock only — there's no real backend/JWT here. Two-factor is password +
-  // OTP: no separate authenticator-app enrollment/recovery-codes ceremony —
-  // every successful login goes straight to OTP verification.
-  const handleSubmit = (e: FormEvent) => {
+  // Reading location.search directly (not next/navigation's useSearchParams)
+  // keeps this page statically renderable — useSearchParams would force a
+  // Suspense boundary just for this one-off notice. useSyncExternalStore
+  // instead of an effect + setState: null on the server, real value on the
+  // client, no extra render pass.
+  const notice = useSyncExternalStore(noopSubscribe, readNotice, () => null)
+
+  // Already signed in (valid token + completed code check) → straight to
+  // the console. "/" redirects here unconditionally, so without this a
+  // signed-in admin opening the bare URL got the sign-in form again.
+  const hasHydrated = useAdminSession((s) => s.hasHydrated)
+  const adminUser = useAdminSession((s) => s.adminUser)
+  const totpVerifiedAt = useAdminSession((s) => s.totpVerifiedAt)
+  useEffect(() => {
+    if (!hasHydrated || !adminUser || !totpVerifiedAt) return
+    const token = getAccessToken()
+    if (token && !isAccessTokenExpired(token)) router.replace(ROUTES.dashboard)
+  }, [hasHydrated, adminUser, totpVerifiedAt, router])
+
+  // Step 1 of admin_auth.json's flow — password only. On success the
+  // backend tells us whether this is a first-ever login (needsEnrollment,
+  // render the TOTP QR) or a returning one (needsTotp, plain code entry).
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
-
-    const validEmail = email.trim().toLowerCase() === SUPERADMIN_CREDENTIALS.email.toLowerCase()
-    const validPassword = password === SUPERADMIN_CREDENTIALS.password
-
-    if (!validEmail || !validPassword) {
-      setError("Invalid email or password.")
-      return
-    }
-
+    if (inFlight.current) return
+    inFlight.current = true
     setError("")
-    setSubmitting(true)
-    login(superAdminUser)
-    router.push(ROUTES.totpVerify)
+    setNoticeDismissed(true)
+    try {
+      const { needsEnrollment } = await login(email.trim(), password)
+      router.replace(needsEnrollment ? ROUTES.totpEnroll : ROUTES.totpVerify)
+    } catch (err) {
+      setError(describeAuthError(err))
+    } finally {
+      inFlight.current = false
+    }
   }
+
+  const noticeText =
+    notice === "session-expired"
+      ? "Your session ended (sessions last 8 hours) — please sign in again."
+      : "That sign-in attempt took too long and expired — please sign in again."
 
   return (
     // Theme-aware background — matches the rest of the portal's light/dark toggle (previously hardcoded dark).
@@ -56,12 +95,20 @@ export default function LoginPage() {
           <p className="mt-1 text-xs uppercase tracking-[0.2em] text-brand-primary-dark">Approve · Verify · Publish</p>
         </div>
 
+        {notice && !noticeDismissed && (
+          <div role="status" className="mb-4 flex items-center gap-2 border border-brand-primary-dark/30 bg-brand-primary-dark/10 px-3 py-2 text-xs font-semibold text-brand-primary-dark">
+            <Info className="h-4 w-4 shrink-0" />
+            {noticeText}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="text-[11px] font-semibold uppercase tracking-wide text-brand-secondary/50">Email</label>
+            <label htmlFor={`${ids}-email`} className="text-[11px] font-semibold uppercase tracking-wide text-brand-secondary/50">Email</label>
             <div className="mt-1.5 flex items-center gap-2 border border-brand-border-light bg-card px-4 py-3 focus-within:border-brand-primary-dark">
-              <Mail className="h-4 w-4 text-brand-primary-dark" />
+              <Mail aria-hidden className="h-4 w-4 text-brand-primary-dark" />
               <input
+                id={`${ids}-email`}
                 type="email"
                 required
                 autoComplete="username"
@@ -73,10 +120,11 @@ export default function LoginPage() {
             </div>
           </div>
           <div>
-            <label className="text-[11px] font-semibold uppercase tracking-wide text-brand-secondary/50">Password</label>
+            <label htmlFor={`${ids}-password`} className="text-[11px] font-semibold uppercase tracking-wide text-brand-secondary/50">Password</label>
             <div className="mt-1.5 flex items-center gap-2 border border-brand-border-light bg-card px-4 py-3 focus-within:border-brand-primary-dark">
-              <Lock className="h-4 w-4 text-brand-primary-dark" />
+              <Lock aria-hidden className="h-4 w-4 text-brand-primary-dark" />
               <input
+                id={`${ids}-password`}
                 type="password"
                 required
                 autoComplete="current-password"
@@ -89,7 +137,7 @@ export default function LoginPage() {
           </div>
 
           {error && (
-            <div className="flex items-center gap-2 border border-red-600/30 bg-red-600/10 px-3 py-2 text-xs font-semibold text-red-600">
+            <div role="alert" className="flex items-center gap-2 border border-red-600/30 bg-red-600/10 px-3 py-2 text-xs font-semibold text-red-600">
               <AlertCircle className="h-4 w-4 shrink-0" />
               {error}
             </div>
@@ -97,17 +145,17 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={submitting}
+            disabled={isLoggingIn}
             className="btn-gold flex w-full items-center justify-center gap-2 overflow-hidden py-3.5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-60"
           >
             <span className="relative z-10 flex items-center gap-2">
-              {submitting ? "Signing in…" : "Sign in"} <ArrowRight className="h-4 w-4" />
+              {isLoggingIn ? "Signing in…" : "Sign in"} <ArrowRight className="h-4 w-4" />
             </span>
           </button>
         </form>
 
         <p className="mt-4 text-center text-[11px] leading-relaxed text-brand-secondary/50">
-          Admin access requires an OTP on every session (BR-80). No anonymous surface — this console is not indexed.
+          Every session needs your password and a code from your authenticator app. Sessions last 8 hours.
         </p>
       </motion.div>
     </div>

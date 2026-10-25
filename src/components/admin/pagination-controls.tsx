@@ -17,7 +17,7 @@ export function PaginationControls({ page, setPage, totalPages, start, pageSize,
   if (totalPages <= 1) return null
 
   return (
-    <div className="flex items-center justify-between border-t border-brand-border px-4 py-3 text-xs text-brand-muted-foreground">
+    <nav aria-label="Pagination" className="flex flex-wrap items-center justify-between gap-2 border-t border-brand-border px-4 py-3 text-xs text-brand-muted-foreground">
       <span>
         Showing {start + 1}–{Math.min(start + pageSize, totalRows)} of {totalRows}
       </span>
@@ -32,6 +32,6 @@ export function PaginationControls({ page, setPage, totalPages, start, pageSize,
           Next <ChevronRight className="h-3.5 w-3.5" />
         </Button>
       </div>
-    </div>
+    </nav>
   )
 }

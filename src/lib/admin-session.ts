@@ -2,8 +2,12 @@
 
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
+import { getTokenTotpVerifiedAt } from "@/lib/admin-tokens"
 
-export type AdminRole = "super_admin"
+// Only super_admin is seeded today (PARTNER-AUTH-INTEGRATION.md §4), but the
+// backend's `admin.role` already models the other three for when more admins
+// (ops/finance/moderator) get created by a super-admin later.
+export type AdminRole = "super_admin" | "ops" | "finance" | "moderator"
 
 export type AdminUser = {
   id: string
@@ -30,13 +34,23 @@ type AdminSessionState = {
 }
 
 /**
- * Mock admin session store — mirrors VXP's nav-store.ts pattern (client-persisted
- * demo session, no real backend/JWT). Kept entirely separate from VXP's consumer
- * session: admin identity is never a flag on a shared user object (04-System-
- * Architecture.md §14.2 — "admin identity is never a flag on `users`").
+ * Admin session display/gate store — mirrors VXP's nav-store.ts pattern
+ * (client-persisted session, zustand). Kept entirely separate from VXP's
+ * consumer session: admin identity is never a flag on a shared user object
+ * (04-System-Architecture.md §14.2 — "admin identity is never a flag on
+ * `users`").
  *
- * Login is password + OTP: no separate authenticator-app enrollment/recovery-codes
- * ceremony — every login goes password → OTP verify → dashboard.
+ * This store only ever caches what the backend already returned (see
+ * src/hooks/use-admin-auth.ts, the only place that calls `login`/`logout`
+ * here) — the real credential is the bearer accessToken in
+ * src/lib/admin-tokens.ts, not anything in this persisted state. Losing this
+ * store (cleared storage, different device) just means re-deriving
+ * `adminUser`/`totpVerifiedAt` from a fresh login; losing the accessToken
+ * means the session is actually dead.
+ *
+ * Real login is password → TOTP (enrollment on first-ever login, plain
+ * verify every time after) — see admin_auth.json / PARTNER-AUTH-
+ * INTEGRATION.md §4.
  */
 export const useAdminSession = create<AdminSessionState>()(
   persist(
@@ -68,29 +82,22 @@ export const useAdminSession = create<AdminSessionState>()(
   ),
 )
 
+/**
+ * Uses the later of this tab's own record and the `totpVerifiedAt` claim in
+ * the current token — the server enforces the window from the token, so a
+ * step-up done in another tab (which writes a fresh token to shared
+ * localStorage) counts here too, and the dialog isn't shown needlessly.
+ */
 export function isStepUpFresh(totpVerifiedAt: number | null) {
-  return totpVerifiedAt != null && Date.now() - totpVerifiedAt < STEP_UP_WINDOW_MS
+  const fromToken = getTokenTotpVerifiedAt()
+  const latest = Math.max(totpVerifiedAt ?? 0, fromToken ?? 0)
+  return latest > 0 && Date.now() - latest < STEP_UP_WINDOW_MS
 }
 
 const roleName: Record<AdminRole, string> = {
   super_admin: "Super Admin",
+  ops: "Ops",
+  finance: "Finance",
+  moderator: "Moderator",
 }
 export const ADMIN_ROLE_NAME = roleName
-
-/** Mock credential pair the login form checks against — there's no real
- *  backend yet, so this stands in for the AdminUser.passwordHash check
- *  (04-System-Architecture.md §14.2: admin access is a dedicated identity,
- *  never a role flag on a consumer user). */
-export const SUPERADMIN_CREDENTIALS = {
-  email: "admin@vexora.in",
-  password: "Vexora@Admin123",
-}
-
-/** The single seeded superadmin — VXA has exactly one admin account. */
-export const superAdminUser: AdminUser = {
-  id: "adm-001",
-  name: "Priya Nair",
-  email: SUPERADMIN_CREDENTIALS.email,
-  initials: "PN",
-  role: "super_admin",
-}

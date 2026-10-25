@@ -1,59 +1,62 @@
 "use client"
 
-import { ConfigField } from "@/components/admin/config-field"
-import { DataTable, type DataTableColumn } from "@/components/admin/data-table"
-import { PaginationControls } from "@/components/admin/pagination-controls"
-import { StatusPill } from "@/components/admin/status-pill"
-import { usePagination } from "@/lib/use-pagination"
-import { useAdminDataStore } from "@/lib/admin-data-store"
-import type { MembershipPlanVersion } from "@/lib/admin-data"
+import { Suspense } from "react"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { PlatformConfigSection } from "@/components/admin/config/platform-config-section"
+import { MembershipPlansSection } from "@/components/admin/config/membership-plans-section"
+import { AmenitiesSection } from "@/components/admin/config/amenities-section"
+import { LocationsSection } from "@/components/admin/config/locations-section"
 
-const CONFIG_PAGE_SIZE = 5
+const TABS = [
+  { value: "platform", label: "Platform values" },
+  { value: "plans", label: "Membership plans" },
+  { value: "locations", label: "Locations" },
+  { value: "amenities", label: "Amenities" },
+] as const
+type TabValue = (typeof TABS)[number]["value"]
 
 export default function ConfigPage() {
-  const platformConfig = useAdminDataStore((s) => s.platformConfig)
-  const membershipPlanVersions = useAdminDataStore((s) => s.membershipPlanVersions)
-  const { page, setPage, totalPages, start, pageRows } = usePagination(platformConfig, CONFIG_PAGE_SIZE)
+  return (
+    <Suspense fallback={null}>
+      <ConfigTabs />
+    </Suspense>
+  )
+}
 
-  const planColumns: DataTableColumn<MembershipPlanVersion>[] = [
-    { key: "tier", header: "Tier", render: (p) => <span className="rounded-full bg-brand-tertiary px-2 py-0.5 text-[10px] font-bold text-brand-primary-dark">{p.tier}</span> },
-    { key: "version", header: "Version", render: (p) => `v${p.version}` },
-    { key: "price", header: "Price", render: (p) => `₹${p.priceInr.toLocaleString()} / ${p.billingCycleMonths}mo` },
-    { key: "effective", header: "Effective from", render: (p) => p.effectiveFrom },
-    { key: "status", header: "Status", render: (p) => <StatusPill tone={p.isCurrent ? "success" : "neutral"}>{p.isCurrent ? "current" : "superseded"}</StatusPill> },
-  ]
+/** G8 — every admin-editable live setting, one tab per resource. Active tab lives in ?tab= so it survives reloads and links. */
+function ConfigTabs() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const pathname = usePathname()
+  const requested = searchParams.get("tab")
+  const tab: TabValue = TABS.some((t) => t.value === requested) ? (requested as TabValue) : "platform"
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h2 className="mb-1 font-serif text-lg font-bold text-brand-secondary">Platform configuration</h2>
-        <p className="mb-4 text-sm text-brand-secondary/60">
-          Live-edit prices, quotas, validity days & thresholds — Redis-cached, no deploy needed. Writes require step-up (BR-82).
-        </p>
-        <div className="space-y-2.5">
-          {pageRows.map((entry) => (
-            <ConfigField key={entry.key} entry={entry} />
-          ))}
-        </div>
-        {totalPages > 1 && (
-          <div className="mt-2 border border-brand-border">
-            <PaginationControls
-              page={page}
-              setPage={setPage}
-              totalPages={totalPages}
-              start={start}
-              pageSize={CONFIG_PAGE_SIZE}
-              totalRows={platformConfig.length}
-            />
-          </div>
-        )}
-      </div>
-
-      <div>
-        <h2 className="mb-1 font-serif text-lg font-bold text-brand-secondary">Membership plan versions</h2>
-        <p className="mb-3 text-sm text-brand-secondary/60">Price changes create a new version row — never mutate one in place.</p>
-        <DataTable columns={planColumns} rows={membershipPlanVersions} rowKey={(p) => `${p.tier}-${p.version}`} />
-      </div>
-    </div>
+    <Tabs
+      value={tab}
+      onValueChange={(v) => router.replace(`${pathname}?tab=${v}`, { scroll: false })}
+      className="space-y-6"
+    >
+      <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 sm:w-auto">
+        {TABS.map((t) => (
+          <TabsTrigger key={t.value} value={t.value}>
+            {t.label}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+      <TabsContent value="platform">
+        <PlatformConfigSection />
+      </TabsContent>
+      <TabsContent value="plans">
+        <MembershipPlansSection />
+      </TabsContent>
+      <TabsContent value="locations">
+        <LocationsSection />
+      </TabsContent>
+      <TabsContent value="amenities">
+        <AmenitiesSection />
+      </TabsContent>
+    </Tabs>
   )
 }
