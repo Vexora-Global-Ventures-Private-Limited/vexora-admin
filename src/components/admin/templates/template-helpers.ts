@@ -28,6 +28,18 @@ export function usedVariables(text: string): string[] {
 }
 
 /**
+ * `{{…}}` fragments that aren't a valid placeholder — `{{user-name}}`,
+ * `{{ }}`, a stray `{{name}` — would go out to users as literal braces, and
+ * the unknown-variable check never sees them because they don't parse.
+ */
+export function malformedPlaceholders(text: string): string[] {
+  const found = new Set(text.replace(VARIABLE_PATTERN, "").match(/\{\{[^{}]{0,40}\}?\}?|\}\}/g) ?? [])
+  // {{{name}}} renders as "{value}" — the outer braces leak into the message.
+  for (const m of text.match(/\{\{\{[^{}]*\}\}\}/g) ?? []) found.add(m)
+  return Array.from(found)
+}
+
+/**
  * Own-property lookup — variable names come from free text, so a plain
  * `values[name]` would hit Object.prototype for `{{constructor}}` /
  * `{{toString}}` and crash the page (`.trim` of a function).

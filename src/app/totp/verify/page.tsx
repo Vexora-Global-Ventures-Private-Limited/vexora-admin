@@ -1,5 +1,6 @@
 "use client"
 
+import { takeReturnTo } from "@/lib/return-to"
 import { useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useRouter } from "next/navigation"
 import { motion } from "framer-motion"
@@ -29,6 +30,11 @@ export default function OtpVerifyPage() {
   const [verified, setVerified] = useState(false)
   // Render-visible twin of inFlight (refs can't be read during render).
   const [busy, setBusy] = useState(false)
+  // Set when this page is already navigating away on purpose (dead
+  // tempToken → /login?expired=1, or "different account"). Without it, the
+  // "no tempToken → /login" effect fired right after and replaced that
+  // navigation with a bare /login, so the "attempt expired" notice was lost.
+  const [leaving, setLeaving] = useState(false)
 
   // A tempToken only exists here right after step 1 (/login) succeeded with
   // needsTotp — landing on this page any other way (direct nav, expired tab)
@@ -40,8 +46,8 @@ export default function OtpVerifyPage() {
   useEffect(() => {
     // inFlight: verifyLogin clears the tempToken before it resolves, so a
     // re-render mid-verify must not read that as "nothing to verify".
-    if (hasTempToken === false && !verified && !busy) router.replace(ROUTES.login)
-  }, [hasTempToken, verified, busy, router])
+    if (hasTempToken === false && !verified && !busy && !leaving) router.replace(ROUTES.login)
+  }, [hasTempToken, verified, busy, leaving, router])
 
   // `value` comes from the OTP input's onComplete — the `code` state hasn't
   // re-rendered yet at that point, so reading it would see 5 digits and the
@@ -56,11 +62,13 @@ export default function OtpVerifyPage() {
     try {
       await verifyLogin(submitted)
       setVerified(true)
-      router.replace(ROUTES.dashboard)
+      // Back to the page they were on when their session expired, if any.
+      router.replace(takeReturnTo(ROUTES.dashboard))
     } catch (err) {
       // The 10-minute tempToken from step 1 is dead — no code will ever
       // succeed against it. Send the admin back to /login for a fresh one.
       if (getApiErrorCode(err) === "TEMP_TOKEN_INVALID") {
+        setLeaving(true)
         clearTempToken()
         router.replace(`${ROUTES.login}?expired=1`)
         return
@@ -76,11 +84,12 @@ export default function OtpVerifyPage() {
   }
 
   const startOver = () => {
+    setLeaving(true)
     clearTempToken()
     router.replace(ROUTES.login)
   }
 
-  if (hasTempToken === null || (!hasTempToken && !verified && !busy)) return null
+  if (hasTempToken === null || leaving || (!hasTempToken && !verified && !busy)) return null
 
   return (
     // Theme-aware background — matches the rest of the portal's light/dark toggle (previously hardcoded dark).
@@ -126,7 +135,15 @@ export default function OtpVerifyPage() {
                 invalid={!!error}
               />
             ) : (
-              <RecoveryCodeInput value={recoveryCode} onChange={setRecoveryCode} onSubmit={() => void verify()} disabled={isVerifying} />
+              <RecoveryCodeInput
+                value={recoveryCode}
+                onChange={(v) => {
+                  setRecoveryCode(v)
+                  if (error) setError("")
+                }}
+                onSubmit={() => void verify()}
+                disabled={isVerifying}
+              />
             )}
           </div>
 

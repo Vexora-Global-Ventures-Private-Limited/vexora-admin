@@ -47,6 +47,76 @@ const JSON_KEY_RULES: Record<string, (v: unknown) => string | null> = {
 }
 
 /**
+ * JSON.parse silently keeps only the LAST of two duplicate keys and rounds
+ * integers past 2^53 — both change the value without telling anyone. This
+ * walks the (already valid) text once and reports either problem.
+ */
+function jsonLossiness(text: string): string | null {
+  let i = 0
+  const ws = () => {
+    while (i < text.length && /\s/.test(text[i])) i++
+  }
+  const str = () => {
+    const start = i++
+    while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1
+    i++
+    return JSON.parse(text.slice(start, i)) as string
+  }
+  const value = (): string | null => {
+    ws()
+    const c = text[i]
+    if (c === "{") {
+      i++
+      const keys = new Set<string>()
+      ws()
+      if (text[i] === "}") return (i++, null)
+      for (;;) {
+        ws()
+        const key = str()
+        if (keys.has(key)) return `Duplicate key "${key}" — JSON would silently keep only the last one.`
+        keys.add(key)
+        ws()
+        i++ // ":"
+        const inner = value()
+        if (inner) return inner
+        ws()
+        if (text[i++] === "}") return null
+      }
+    }
+    if (c === "[") {
+      i++
+      ws()
+      if (text[i] === "]") return (i++, null)
+      for (;;) {
+        const inner = value()
+        if (inner) return inner
+        ws()
+        if (text[i++] === "]") return null
+      }
+    }
+    if (c === '"') return (str(), null)
+    const m = /^-?\d+(\.\d+)?([eE][+-]?\d+)?/.exec(text.slice(i))
+    if (m) {
+      i += m[0].length
+      if (!m[1] && !m[2] && !Number.isSafeInteger(Number(m[0]))) return `${m[0]} is too large to store exactly.`
+      return null
+    }
+    i += c === "t" || c === "n" ? 4 : 5 // true / null / false
+    return null
+  }
+  try {
+    return value()
+  } catch {
+    return null
+  }
+}
+
+/** More than 15 significant digits can't round-trip through a JS number. */
+function tooPrecise(t: string) {
+  return t.replace(/^-/, "").replace(".", "").replace(/^0+/, "").length > 15
+}
+
+/**
  * Turns the editor's text into a typed value, or an error message.
  * `current` (the live value) pins a JSON key to its existing shape — an
  * array stays an array, an object stays an object.
@@ -62,21 +132,30 @@ export function parseConfigDraft(type: ConfigType, draft: string, bool: boolean,
       if (!/^-?\d+$/.test(t)) return { error: "Enter a whole number." }
       const n = Number(t)
       if (!Number.isSafeInteger(n)) return { error: "That number is too large." }
-      return nonNegative && n < 0 ? { error: "This can't be negative." } : { value: n }
+      // "-0" is a real JS value that serialises as 0 — normalise it.
+      return nonNegative && n < 0 ? { error: "This can't be negative." } : { value: n === 0 ? 0 : n }
     }
     case "decimal": {
       const t = draft.trim()
+      if (/^-?\d+,\d+$/.test(t)) return { error: "Use a dot for decimals, e.g. 1.5 (not 1,5)." }
       if (!/^-?\d+(\.\d+)?$/.test(t)) return { error: "Enter a number, e.g. 1.5" }
-      return nonNegative && Number(t) < 0 ? { error: "This can't be negative." } : { value: Number(t) }
+      if (tooPrecise(t)) return { error: "Too many digits to store exactly (max 15 significant)." }
+      const n = Number(t)
+      return nonNegative && n < 0 ? { error: "This can't be negative." } : { value: n === 0 ? 0 : n }
     }
     case "json": {
+      // A pasted byte-order mark makes JSON.parse fail with no visible cause.
+      const text = draft.replace(/^\uFEFF/, "")
       let value: unknown
       try {
-        value = JSON.parse(draft)
+        value = JSON.parse(text)
       } catch {
-        return { error: "Not valid JSON — check brackets, quotes and commas." }
+        return { error: "Not valid JSON — check brackets, quotes and commas (trailing commas aren't allowed)." }
       }
-      if (current !== undefined && jsonShape(value) !== jsonShape(current)) {
+      const lossy = jsonLossiness(text)
+      if (lossy) return { error: lossy }
+      // A key that's currently null has no shape to keep.
+      if (current !== undefined && current !== null && jsonShape(value) !== jsonShape(current)) {
         return { error: `This setting must stay a JSON ${jsonShape(current)} — the platform reads it as one.` }
       }
       const ruleError = JSON_KEY_RULES[key]?.(value)
@@ -135,6 +214,7 @@ export function ConfigField({ entry: live, canEdit }: { entry: ConfigEntry; canE
   const edited = entry.type === "boolean" ? bool !== Boolean(entry.value) : draft !== configDraftFrom(entry)
   const dirty = !parsed.error && JSON.stringify(parsed.value) !== JSON.stringify(entry.value)
   const busy = isSaving || isDeleting || stepUp.open
+  const spaceWarning = entry.type === "string" && draft !== draft.trim() ? "Leading or trailing spaces will be saved as part of the value." : null
 
   const adopt = (next: ConfigEntry) => {
     setEntry(next)
@@ -142,7 +222,9 @@ export function ConfigField({ entry: live, canEdit }: { entry: ConfigEntry; canE
     setBool(Boolean(next.value))
     setAdoptNext(false)
   }
-  const newerOnServer = live.updatedAt !== entry.updatedAt
+  // Strictly newer — right after our own save `entry` is the PUT's response
+  // and the cached `live` row is still the OLD copy until the refetch lands.
+  const newerOnServer = Date.parse(live.updatedAt) > Date.parse(entry.updatedAt)
   if (newerOnServer && (adoptNext || !edited)) adopt(live)
 
   const reset = () => adopt(live)
@@ -156,16 +238,21 @@ export function ConfigField({ entry: live, canEdit }: { entry: ConfigEntry; canE
 
   const save = () => {
     setConfirmOpen(false)
+    let saved: ConfigEntry | undefined
     stepUp.run(
       async () => {
         await assertUnchanged()
         // Seeded rows always have a description today; fall back to the key
         // rather than fail the PUT if one ever doesn't (it's required).
-        await putConfig({ key: entry._id, value: parsed.value, type: entry.type, description: entry.description || entry._id }).unwrap()
+        saved = await putConfig({ key: entry._id, value: parsed.value, type: entry.type, description: entry.description || entry._id }).unwrap()
       },
       {
         onSuccess: () => {
-          setAdoptNext(true)
+          // Adopt the server's copy right away — waiting for the list refetch
+          // left Save clickable (draft ≠ old entry) and a second click would
+          // have been refused as "changed by another admin".
+          if (saved) adopt(saved)
+          else setAdoptNext(true)
           toast.success(`${entry._id} updated`, { description: "Live now · audit-logged." })
         },
         onError: (err) =>
@@ -249,6 +336,7 @@ export function ConfigField({ entry: live, canEdit }: { entry: ConfigEntry; canE
           {parsed.error}
         </p>
       )}
+      {!parsed.error && spaceWarning && edited && <p className="text-xs text-amber-700">{spaceWarning}</p>}
 
       {newerOnServer && !adoptNext && (
         <div role="alert" className="flex flex-wrap items-center justify-between gap-2 border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-800">

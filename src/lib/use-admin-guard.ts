@@ -1,5 +1,6 @@
 "use client"
 
+import { rememberReturnTo } from "@/lib/return-to"
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { useAdminSession } from "@/lib/admin-session"
@@ -34,6 +35,7 @@ export function useAdminGuard() {
     if (expired) {
       clearAccessToken()
       logout()
+      rememberReturnTo()
       router.replace(`${ROUTES.login}?session=expired`)
     } else if (!adminUser || !getAccessToken()) {
       router.replace(ROUTES.login)

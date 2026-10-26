@@ -15,7 +15,12 @@ type Props = {
   className?: string
 }
 
+// Indian digit grouping (12,34,567) to match the rest of the console. A
+// custom `separator` falls back to plain groups of three.
 function format(n: number, decimals: number, separator: string) {
+  if (separator === ",") {
+    return n.toLocaleString("en-IN", { minimumFractionDigits: decimals, maximumFractionDigits: decimals })
+  }
   const fixed = n.toFixed(decimals)
   const [int, dec] = fixed.split(".")
   const withSep = int.replace(/\B(?=(\d{3})+(?!\d))/g, separator)

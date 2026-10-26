@@ -45,16 +45,18 @@ function ConfigTabs() {
           </TabsTrigger>
         ))}
       </TabsList>
-      <TabsContent value="platform">
+      {/* forceMount keeps every tab alive while hidden, so an unsaved config
+          edit survives a look at another tab (Radix unmounts inactive tabs by default). */}
+      <TabsContent value="platform" forceMount className="data-[state=inactive]:hidden">
         <PlatformConfigSection />
       </TabsContent>
-      <TabsContent value="plans">
+      <TabsContent value="plans" forceMount className="data-[state=inactive]:hidden">
         <MembershipPlansSection />
       </TabsContent>
-      <TabsContent value="locations">
+      <TabsContent value="locations" forceMount className="data-[state=inactive]:hidden">
         <LocationsSection />
       </TabsContent>
-      <TabsContent value="amenities">
+      <TabsContent value="amenities" forceMount className="data-[state=inactive]:hidden">
         <AmenitiesSection />
       </TabsContent>
     </Tabs>

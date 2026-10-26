@@ -9,7 +9,7 @@ import { StatCard } from "@/components/admin/stat-card"
 import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/components/ui/chart"
 import { useGetDashboardQuery } from "@/store/api/adminApi"
 import { getApiErrorMessage } from "@/lib/api-error"
-import { formatDateTime, istToday, isPending, LISTING_STATUS_LABEL, pendingOr, TIER_LABEL } from "@/components/admin/dashboard/dashboard-utils"
+import { dashCounts, dashValue, formatCount, formatDateTime, istToday, isPending, LISTING_STATUS_LABEL, TIER_LABEL } from "@/components/admin/dashboard/dashboard-utils"
 
 const LISTINGS_CONFIG: ChartConfig = { count: { label: "Listings", color: "var(--brand-primary-dark)" } }
 
@@ -52,7 +52,7 @@ export default function ReportsPage() {
 
   const listingsData = useMemo(
     () =>
-      Object.entries(data?.listings.byStatus ?? {}).map(([status, count]) => ({
+      Object.entries(dashCounts(data, "listings.byStatus")).map(([status, count]) => ({
         status: LISTING_STATUS_LABEL[status] ?? status,
         count,
       })),
@@ -61,27 +61,33 @@ export default function ReportsPage() {
 
   const exportSnapshot = () => {
     if (!data) return
-    const v = (path: string, value: number | null) => (isPending(data, path) ? "not available yet" : (value ?? ""))
+    // Every number goes through dashValue(): pending → "not available yet",
+    // missing → blank. A pending field never exports as a real-looking 0.
+    const NA = "not available yet"
+    const v = (path: string) => (isPending(data, path) ? NA : (dashValue(data, path) ?? ""))
+    const listingRows: (string | number)[][] = isPending(data, "listings.byStatus")
+      ? [["Listings by status", NA]]
+      : Object.entries(dashCounts(data, "listings.byStatus")).map(([st, c]) => [`Listings — ${LISTING_STATUS_LABEL[st] ?? st}`, c])
+    const tiersPending = isPending(data, "memberships.byTier")
+    const byTier = dashCounts(data, "memberships.byTier")
     const rows: (string | number)[][] = [
       ["Metric", "Value"],
-      ["Snapshot taken (IST)", formatDateTime(new Date(fulfilledTimeStamp ?? Date.now()).toISOString())],
-      ["Signups today", v("users.signups.today", data.users.signups.today)],
-      ["Signups last 7 days", v("users.signups.last7d", data.users.signups.last7d)],
-      ["Signups last 30 days", v("users.signups.last30d", data.users.signups.last30d)],
-      ["Active users", v("users.active", data.users.active)],
-      ["Suspended users", v("users.suspended", data.users.suspended)],
-      ...Object.entries(data.listings.byStatus).map(([s, c]) => [`Listings — ${LISTING_STATUS_LABEL[s] ?? s}`, c]),
-      ["Listing moderation queue", data.listings.moderationQueue],
-      ...(["mercury", "jupiter", "venus"] as const).map((t) => [
-        `Memberships — ${TIER_LABEL[t]}`,
-        v("memberships.byTier", data.memberships.byTier[t] ?? 0),
-      ]),
-      ["Leads last 30 days", v("leads.last30d", data.leads.last30d)],
-      ["MRR (₹)", v("mrr", data.mrr)],
-      ["Open abuse reports", data.abuse.open],
-      ["Abuse SLA breaches", data.abuse.slaBreached],
-      ["KYC queue", data.queues.kyc],
-      ["Ads queue", data.queues.ads],
+      ["Snapshot taken", formatDateTime(new Date(fulfilledTimeStamp ?? Date.now()).toISOString())],
+      ["Signups today", v("users.signups.today")],
+      ["Signups last 7 days", v("users.signups.last7d")],
+      ["Signups last 30 days", v("users.signups.last30d")],
+      ["Active users", v("users.active")],
+      ["Suspended users", v("users.suspended")],
+      ...listingRows,
+      ["Listing moderation queue", v("listings.moderationQueue")],
+      ...(["mercury", "jupiter", "venus"] as const).map((t) => [`Memberships — ${TIER_LABEL[t]}`, tiersPending ? NA : (byTier[t] ?? 0)]),
+      ["Leads last 30 days", v("leads.last30d")],
+      // Unit of mrr isn't documented (rupees vs paise) — exported as the raw value.
+      ["MRR (raw value)", v("mrr")],
+      ["Open abuse reports", v("abuse.open")],
+      ["Abuse SLA breaches", v("abuse.slaBreached")],
+      ["KYC queue", v("queues.kyc")],
+      ["Ads queue", v("queues.ads")],
     ]
     downloadCsv(`vxa-platform-snapshot-${istToday()}.csv`, rows)
     toast.success("Snapshot downloaded")
@@ -114,10 +120,10 @@ export default function ReportsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Signups (30d)" value={data ? pendingOr(data, "users.signups.last30d", data.users.signups.last30d) : 0} loading={isLoading} />
-        <StatCard label="Active users" value={data ? pendingOr(data, "users.active", data.users.active) : 0} loading={isLoading} />
-        <StatCard label="MRR" value={data ? pendingOr(data, "mrr", data.mrr) : 0} prefix="₹" loading={isLoading} />
-        <StatCard label="Leads (30d)" value={data ? pendingOr(data, "leads.last30d", data.leads.last30d) : 0} loading={isLoading} />
+        <StatCard label="Signups (30d)" value={dashValue(data, "users.signups.last30d")} loading={isLoading} />
+        <StatCard label="Active users" value={dashValue(data, "users.active")} loading={isLoading} />
+        <StatCard label="MRR" value={dashValue(data, "mrr")} prefix="₹" loading={isLoading} />
+        <StatCard label="Leads (30d)" value={dashValue(data, "leads.last30d")} loading={isLoading} />
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -162,14 +168,16 @@ export default function ReportsPage() {
         </h2>
         <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
           {[
-            ["Open abuse reports", data?.abuse.open],
-            ["Abuse SLA breaches", data?.abuse.slaBreached],
-            ["Listing queue", data?.listings.moderationQueue],
-            ["Ad queue", data?.queues.ads],
+            ["Open abuse reports", dashValue(data, "abuse.open")],
+            ["Abuse SLA breaches", dashValue(data, "abuse.slaBreached")],
+            ["Listing queue", dashValue(data, "listings.moderationQueue")],
+            ["Ad queue", dashValue(data, "queues.ads")],
           ].map(([label, value]) => (
             <div key={label as string} className="bg-brand-tertiary/40 p-3">
               <dt className="text-[10px] uppercase tracking-wide text-brand-secondary/55">{label}</dt>
-              <dd className="mt-1 font-serif text-xl font-bold text-brand-secondary">{isLoading ? "…" : (value ?? 0)}</dd>
+              <dd className="mt-1 font-serif text-xl font-bold text-brand-secondary">
+                {isLoading ? "…" : value == null ? <span className="font-sans text-sm text-brand-muted-foreground">Not available yet</span> : formatCount(value as number)}
+              </dd>
             </div>
           ))}
         </dl>

@@ -141,7 +141,14 @@ export function DataTable<T>({
             <TableRow
               key={rowKey(row)}
               className={cn("border-brand-border/70", onRowClick && "cursor-pointer hover:bg-brand-tertiary/50")}
-              onClick={() => onRowClick?.(row)}
+              // Ignore clicks that started on a link/button/input inside the row —
+              // e.g. a row action button would otherwise also open the row.
+              onClick={(e) => {
+                if (!onRowClick) return
+                const interactive = (e.target as HTMLElement).closest("a,button,input,select,textarea,[role=button],[role=menuitem]")
+                if (interactive && interactive !== e.currentTarget) return
+                onRowClick(row)
+              }}
               {...(onRowClick
                 ? {
                     role: "button" as const,

@@ -1,7 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { Suspense, useMemo, useState } from "react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 import { AlertTriangle, Search } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -12,15 +13,37 @@ import { useGetTemplatesQuery, type TemplateEvent, type TemplateVersion } from "
 import { formatDateTime } from "@/components/admin/config/config-helpers"
 import { CHANNEL_LABEL, channelLabel, needsWhatsappName } from "@/components/admin/templates/template-helpers"
 import { ROUTES } from "@/lib/routes"
+import { useSetUrlParams } from "@/components/admin/url-state"
 
 type Row = { event: TemplateEvent; channel: string; template: TemplateVersion }
 
-/** G7 — every notification event × channel with its active template version. */
 export default function TemplatesPage() {
+  return (
+    <Suspense fallback={null}>
+      <TemplatesList />
+    </Suspense>
+  )
+}
+
+/**
+ * G7 — every notification event × channel with its active template version.
+ * Search and filters live in the URL, so coming back from the editor (or
+ * sharing a link) keeps the same view.
+ */
+function TemplatesList() {
   const { data: events, isLoading, isError, refetch, isFetching } = useGetTemplatesQuery()
-  const [channelFilter, setChannelFilter] = useState("all")
-  const [domainFilter, setDomainFilter] = useState("all")
-  const [query, setQuery] = useState("")
+  const searchParams = useSearchParams()
+  const setUrlParams = useSetUrlParams()
+  const channelFilter = searchParams.get("channel") ?? "all"
+  const domainFilter = searchParams.get("domain") ?? "all"
+  // The text box is local so typing stays smooth; the URL follows it.
+  const [query, setQueryState] = useState(() => searchParams.get("q") ?? "")
+  const setQuery = (q: string) => {
+    setQueryState(q)
+    setUrlParams({ q: q.trim() || undefined })
+  }
+  const setChannelFilter = (v: string) => setUrlParams({ channel: v })
+  const setDomainFilter = (v: string) => setUrlParams({ domain: v })
 
   const rows = useMemo<Row[]>(
     () =>

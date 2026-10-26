@@ -231,7 +231,9 @@ export function LiveListingTools({ actions, presetId }: { actions: ListingAction
   const idValid = isObjectId(id)
   const daysNum = Number(days)
   const daysValid = /^\d+$/.test(days) && daysNum >= 1 && daysNum <= MAX_EXTEND_DAYS
-  const busy = idValid && actions.busy(id)
+  // Also "busy" while the step-up code dialog is waiting — a second click
+  // would otherwise be silently dropped by stepUp.run (one action at a time).
+  const busy = (idValid && actions.busy(id)) || actions.stepUp.open
 
   return (
     <div className="space-y-4 border border-brand-border bg-card p-5">
@@ -248,9 +250,12 @@ export function LiveListingTools({ actions, presetId }: { actions: ListingAction
           <Input
             id={`${fieldId}-id`}
             value={listingId}
-            onChange={(e) => setListingId(e.target.value.trim())}
+            // No maxLength: a pasted id with surrounding spaces would be cut
+            // to 24 chars *before* the trim, leaving a 23-char invalid id.
+            onChange={(e) => setListingId(e.target.value.trim().slice(0, 24))}
             placeholder="24-character listing id"
-            maxLength={24}
+            spellCheck={false}
+            autoComplete="off"
             aria-invalid={!!listingId && !idValid}
             className="font-mono text-xs"
           />
@@ -271,7 +276,7 @@ export function LiveListingTools({ actions, presetId }: { actions: ListingAction
           />
         </div>
         <Button variant="outline" className="gap-1.5" disabled={!idValid || !daysValid || busy} onClick={() => setConfirmExtend(true)}>
-          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />} Extend
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />} {actions.stepUp.open ? "Waiting for code…" : "Extend"}
         </Button>
         <Button variant="destructive" className="gap-1.5" disabled={!idValid || busy} onClick={() => setRemoving(true)}>
           <Trash2 className="h-4 w-4" /> Remove

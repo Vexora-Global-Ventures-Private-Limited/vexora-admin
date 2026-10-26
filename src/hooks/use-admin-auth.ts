@@ -1,5 +1,6 @@
 "use client"
 
+import { clearReturnTo } from "@/lib/return-to"
 import { useCallback } from "react"
 import { useLoginMutation, useTotpEnrollMutation, useTotpVerifyMutation, type ApiAdmin } from "@/store/api/adminAuthApi"
 import {
@@ -117,6 +118,7 @@ export function useAdminAuth() {
   // (PARTNER-AUTH-INTEGRATION.md §4) — so clearing the local token *is* the
   // whole logout.
   const logout = useCallback(() => {
+    clearReturnTo()
     clearAccessToken()
     clearTempToken()
     clearOtpauthUrl()

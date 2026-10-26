@@ -9,7 +9,7 @@ import { StatCard } from "@/components/admin/stat-card"
 import { useGetDashboardQuery } from "@/store/api/adminApi"
 import { getApiErrorMessage } from "@/lib/api-error"
 import { ROUTES } from "@/lib/routes"
-import { isPending, LISTING_STATUS_LABEL, pendingOr, TIER_LABEL } from "@/components/admin/dashboard/dashboard-utils"
+import { dashCounts, dashSum, dashValue, formatCount, isPending, LISTING_STATUS_LABEL, TIER_LABEL } from "@/components/admin/dashboard/dashboard-utils"
 
 /**
  * G1 — GET /admin/dashboard. Fields listed in `pending` are backend stubs
@@ -35,20 +35,27 @@ export default function DashboardPage() {
     )
   }
 
-  const listingsByStatus = data?.listings.byStatus ?? {}
-  const liveListings = data ? pendingOr(data, "listings.byStatus", listingsByStatus.live ?? 0) : 0
+  // Every value goes through dashValue(): pending, missing or malformed
+  // fields come back null → "Not available yet", and a stubbed parent the
+  // backend sends as null can't crash the page.
+  const listingsPending = isPending(data, "listings.byStatus")
+  const listingsByStatus = dashCounts(data, "listings.byStatus")
+  const liveListings = data && !listingsPending ? (listingsByStatus.live ?? 0) : null
+  const signupsToday = dashValue(data, "users.signups.today")
+  const signups7d = dashValue(data, "users.signups.last7d")
   const signupHint =
-    data && !isPending(data, "users.signups.today") && !isPending(data, "users.signups.last7d")
-      ? `${data.users.signups.today.toLocaleString("en-IN")} today · ${data.users.signups.last7d.toLocaleString("en-IN")} in 7 days`
-      : undefined
-  const queueTotal = data ? data.listings.moderationQueue + data.queues.kyc + data.queues.ads + data.abuse.open : 0
+    signupsToday != null && signups7d != null ? `${formatCount(signupsToday)} today · ${formatCount(signups7d)} in 7 days` : undefined
+  const QUEUE_PATHS = ["listings.moderationQueue", "queues.kyc", "queues.ads", "abuse.open"]
+  // A total that silently skipped a pending queue would look real — null instead.
+  const queueTotal = dashSum(data, QUEUE_PATHS)
   const tiersPending = isPending(data, "memberships.byTier")
+  const byTier = dashCounts(data, "memberships.byTier")
 
   const queues = [
-    { label: "Listing approvals", count: data?.listings.moderationQueue, href: ROUTES.listings, icon: Building2 },
-    { label: "KYC review", count: data?.queues.kyc, href: ROUTES.kyc, icon: BadgeCheck },
-    { label: "Ad approvals", count: data?.queues.ads, href: ROUTES.ads, icon: Megaphone },
-    { label: "Abuse reports", count: data?.abuse.open, href: ROUTES.abuse, icon: ShieldAlert },
+    { label: "Listing approvals", count: dashValue(data, "listings.moderationQueue"), href: ROUTES.listings, icon: Building2 },
+    { label: "KYC review", count: dashValue(data, "queues.kyc"), href: ROUTES.kyc, icon: BadgeCheck },
+    { label: "Ad approvals", count: dashValue(data, "queues.ads"), href: ROUTES.ads, icon: Megaphone },
+    { label: "Abuse reports", count: dashValue(data, "abuse.open"), href: ROUTES.abuse, icon: ShieldAlert },
   ]
 
   return (
@@ -64,7 +71,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-1 gap-4 min-[420px]:grid-cols-2 lg:grid-cols-3">
         <StatCard
           label="Signups (30d)"
-          value={data ? pendingOr(data, "users.signups.last30d", data.users.signups.last30d) : 0}
+          value={dashValue(data, "users.signups.last30d")}
           hint={signupHint}
           icon={UserPlus}
           loading={isLoading}
@@ -72,14 +79,14 @@ export default function DashboardPage() {
         />
         <StatCard
           label="Active users"
-          value={data ? pendingOr(data, "users.active", data.users.active) : 0}
+          value={dashValue(data, "users.active")}
           icon={Users}
           loading={isLoading}
           href={ROUTES.users}
         />
         <StatCard
           label="Suspended users"
-          value={data ? pendingOr(data, "users.suspended", data.users.suspended) : 0}
+          value={dashValue(data, "users.suspended")}
           icon={UserX}
           loading={isLoading}
           href={`${ROUTES.users}?status=suspended`}
@@ -88,20 +95,20 @@ export default function DashboardPage() {
         <StatCard label="Live listings" value={liveListings} icon={Building} loading={isLoading} />
         <StatCard
           label="MRR"
-          value={data ? pendingOr(data, "mrr", data.mrr) : 0}
+          value={dashValue(data, "mrr")}
           prefix="₹"
           icon={Wallet}
           loading={isLoading}
         />
         <StatCard
           label="Leads (30d)"
-          value={data ? pendingOr(data, "leads.last30d", data.leads.last30d) : 0}
+          value={dashValue(data, "leads.last30d")}
           icon={TrendingUp}
           loading={isLoading}
         />
         <StatCard
           label="Abuse SLA breaches"
-          value={data ? pendingOr(data, "abuse.slaBreached", data.abuse.slaBreached) : 0}
+          value={dashValue(data, "abuse.slaBreached")}
           icon={AlertTriangle}
           loading={isLoading}
           href={ROUTES.abuse}
@@ -122,7 +129,13 @@ export default function DashboardPage() {
             >
               <div>
                 <div className="text-2xl font-bold text-brand-secondary">
-                  {isLoading ? <span className="inline-block h-7 w-10 animate-pulse bg-brand-tertiary" /> : (q.count ?? 0)}
+                  {isLoading ? (
+                    <span className="inline-block h-7 w-10 animate-pulse bg-brand-tertiary" aria-hidden />
+                  ) : q.count == null ? (
+                    <span className="font-sans text-sm font-semibold text-brand-muted-foreground">—</span>
+                  ) : (
+                    formatCount(q.count)
+                  )}
                 </div>
                 <div className="text-xs text-brand-muted-foreground">{q.label}</div>
               </div>
@@ -143,6 +156,8 @@ export default function DashboardPage() {
           </h2>
           {isLoading ? (
             <div className="mt-3 h-16 animate-pulse bg-brand-tertiary/60" />
+          ) : listingsPending ? (
+            <p className="mt-3 text-sm text-brand-muted-foreground">Not available yet — the backend still marks this figure as pending.</p>
           ) : Object.keys(listingsByStatus).length === 0 ? (
             <p className="mt-3 text-sm text-brand-muted-foreground">No listings yet.</p>
           ) : (
@@ -154,7 +169,7 @@ export default function DashboardPage() {
                     <dt className="text-[10px] uppercase tracking-wide text-brand-secondary/55">
                       {LISTING_STATUS_LABEL[status] ?? status}
                     </dt>
-                    <dd className="mt-1 font-serif text-xl font-bold text-brand-secondary">{count}</dd>
+                    <dd className="mt-1 font-serif text-xl font-bold text-brand-secondary">{formatCount(count)}</dd>
                   </div>
                 ))}
             </dl>
@@ -177,7 +192,7 @@ export default function DashboardPage() {
                 <div key={tier} className="bg-brand-tertiary/40 p-3">
                   <dt className="text-[10px] uppercase tracking-wide text-brand-secondary/55">{TIER_LABEL[tier]}</dt>
                   <dd className="mt-1 font-serif text-xl font-bold text-brand-secondary">
-                    {data?.memberships.byTier[tier] ?? 0}
+                    {formatCount(byTier[tier] ?? 0)}
                   </dd>
                 </div>
               ))}

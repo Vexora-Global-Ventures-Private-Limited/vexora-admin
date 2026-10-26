@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import { toast } from "sonner"
-import { Check, ExternalLink, ImageOff, Loader2, ShieldAlert, X } from "lucide-react"
+import { Check, ExternalLink, Eye, ImageOff, Loader2, ShieldAlert, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -185,16 +185,33 @@ export function PendingAdButtons({ ad, actions, size = "sm" }: { ad: AdminAd; ac
   )
 }
 
+// Image hosts the platform itself uses. Anything else is advertiser-chosen:
+// loading it automatically would hand that host the reviewing admin's IP and
+// browser details (a tracking pixel), so those load only on request.
+const TRUSTED_IMAGE_HOSTS = ["res.cloudinary.com", "images.unsplash.com"]
+
+function imageHost(src: string) {
+  try {
+    return new URL(src.trim()).hostname
+  } catch {
+    return ""
+  }
+}
+
 /**
  * Creative preview. The backend stores any string here (verified: it saved
  * `javascript:` and `http:` values), so only https URLs are rendered as an
- * image or link; anything else is shown as inert text and flagged.
+ * image or link; anything else is shown as inert text and flagged. https
+ * images from hosts outside the platform's own load only when asked.
  */
 export function CreativePreview({ creative }: { creative: NonNullable<AdminAd["creatives"]>[number] }) {
   const [broken, setBroken] = useState(false)
-  const src = creative.cloudinaryPublicId
+  const src = (creative.cloudinaryPublicId ?? "").trim()
   const kind = classifyCreativeSrc(src)
-  const safeSrc = kind === "https"
+  const host = kind === "https" ? imageHost(src) : ""
+  const trusted = TRUSTED_IMAGE_HOSTS.includes(host)
+  const [loadRequested, setLoadRequested] = useState(false)
+  const safeSrc = kind === "https" && (trusted || loadRequested)
   const target = creative.targetUrl
   const safeTarget = isSafeHttpsUrl(target)
 
@@ -208,12 +225,19 @@ export function CreativePreview({ creative }: { creative: NonNullable<AdminAd["c
             {kind === "unsafe" ? <ShieldAlert className="h-4 w-4 text-red-500" /> : <ImageOff className="h-4 w-4" />}
             {safeSrc
               ? "Image failed to load"
-              : kind === "asset"
+              : kind === "https"
+                ? `External image on ${host || "an unknown host"} — not loaded automatically`
+                : kind === "asset"
                 ? "Cloudinary asset id — no preview available in the admin"
                 : kind === "empty"
                   ? "No image attached"
                   : "Unsafe URL (not https) — not rendered"}
             <code className="max-w-full break-all text-[10px] text-brand-secondary/50">{src || "(empty)"}</code>
+            {kind === "https" && !trusted && !loadRequested && (
+              <Button type="button" size="sm" variant="outline" className="mt-1 h-7 gap-1 bg-card" onClick={() => setLoadRequested(true)}>
+                <Eye className="h-3.5 w-3.5" /> Load image
+              </Button>
+            )}
           </div>
         </div>
       )}

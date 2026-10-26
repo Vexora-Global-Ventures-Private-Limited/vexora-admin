@@ -1,5 +1,6 @@
 "use client"
 
+import { clearReturnTo, rememberReturnTo } from "@/lib/return-to"
 import { useEffect } from "react"
 import { useAdminSession } from "@/lib/admin-session"
 import {
@@ -44,6 +45,9 @@ export function AdminSessionHydrator() {
       useAdminSession.getState().logout()
       dispatch(baseApi.util.resetApiState())
       if (!isAuthPage(window.location.pathname)) {
+        // Expired: bring them back here after signing in. Signed out on purpose: don't.
+        if (reason === "expired") rememberReturnTo()
+        else clearReturnTo()
         window.location.replace(reason === "expired" ? `${ROUTES.login}?session=expired` : ROUTES.login)
       }
     }

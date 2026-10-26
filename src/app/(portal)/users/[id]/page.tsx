@@ -8,7 +8,7 @@ import { DetailBackLink, DetailCard } from "@/components/admin/detail-page-shell
 import { NotFoundCard } from "@/components/admin/not-found-card"
 import { UserStatusAction } from "@/components/admin/users/user-status-action"
 import { isObjectId, USER_STATUS_LABEL, userLabel, userStatusTone } from "@/components/admin/users/user-utils"
-import { formatDate, formatDateTime, formatPaise, LISTING_STATUS_LABEL, TIER_LABEL } from "@/components/admin/dashboard/dashboard-utils"
+import { formatCount, formatDate, formatDateTime, formatPaise, LISTING_STATUS_LABEL, TIER_LABEL } from "@/components/admin/dashboard/dashboard-utils"
 import { useGetUserQuery } from "@/store/api/adminApi"
 import { getApiErrorCode, getApiErrorMessage } from "@/lib/api-error"
 import { ROUTES } from "@/lib/routes"
@@ -57,7 +57,12 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
     )
   }
 
-  const { user, profile, memberships, listings, leads, payments, abuseReportsAgainst } = data
+  const { user, profile } = data
+  // Summary blocks are read defensively — one missing nested object in the
+  // 360 payload shouldn't blank the whole user page.
+  const memberships = data.memberships ?? []
+  const byStatus = data.listings?.byStatus ?? {}
+  const recentListings = data.listings?.recent ?? []
   const displayName = profile?.fullName || userLabel(user)
   const initials =
     displayName
@@ -67,14 +72,14 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
       .slice(0, 2)
       .map((n) => n.charAt(0).toUpperCase())
       .join("") || "U"
-  const listingTotal = Object.values(listings.byStatus).reduce((a, b) => a + b, 0)
+  const listingTotal = Object.values(byStatus).reduce((a, b) => a + (Number(b) || 0), 0)
 
   const stats = [
     { label: "Listings", value: listingTotal, icon: Building2 },
-    { label: "Leads sent", value: leads.asBuyer, icon: TrendingUp },
-    { label: "Leads received", value: leads.asSeller, icon: TrendingUp },
-    { label: "Payments", value: payments.count, icon: Wallet },
-    { label: "Reports against", value: abuseReportsAgainst, icon: ShieldAlert },
+    { label: "Leads sent", value: data.leads?.asBuyer, icon: TrendingUp },
+    { label: "Leads received", value: data.leads?.asSeller, icon: TrendingUp },
+    { label: "Payments", value: data.payments?.count, icon: Wallet },
+    { label: "Reports against", value: data.abuseReportsAgainst, icon: ShieldAlert },
   ]
 
   return (
@@ -121,7 +126,7 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
               <dt className="text-[10px] uppercase tracking-wide text-brand-secondary/50">{s.label}</dt>
               <dd className="flex flex-col items-center gap-1 font-serif text-lg font-bold text-brand-secondary">
                 <s.icon className="h-4 w-4 text-brand-primary-dark" aria-hidden />
-                {s.value}
+                {formatCount(s.value)}
               </dd>
             </div>
           ))}
@@ -143,16 +148,21 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
         <h3 className="font-serif text-base font-bold text-brand-secondary">Profile</h3>
         {profile ? (
           <dl className="mt-3 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-            {[
-              ["Full name", profile.fullName],
-              ["I am a", profile.intent],
-              ["City", profile.city],
-              ["State", profile.state],
-              ["Profile completed", profile.completedAt ? formatDate(profile.completedAt) : "Not completed"],
-            ].map(([k, v]) => (
+            {(
+              [
+                // Names are shown exactly as the user typed them — CSS
+                // `capitalize` would turn "van der Berg" into "Van Der Berg"
+                // in an admin record. Only the intent enum is title-cased.
+                ["Full name", profile.fullName, false],
+                ["I am a", profile.intent, true],
+                ["City", profile.city, false],
+                ["State", profile.state, false],
+                ["Profile completed", profile.completedAt ? formatDate(profile.completedAt) : "Not completed", false],
+              ] as const
+            ).map(([k, v, titleCase]) => (
               <div key={k}>
                 <dt className="text-[11px] font-semibold uppercase tracking-wide text-brand-muted-foreground">{k}</dt>
-                <dd className="capitalize text-brand-secondary">{v || "—"}</dd>
+                <dd className={`break-words text-brand-secondary${titleCase ? " capitalize" : ""}`}>{v || "—"}</dd>
               </div>
             ))}
           </dl>
@@ -169,9 +179,11 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
         ) : (
           <ul className="mt-3 divide-y divide-brand-border/70 text-sm">
             {memberships.map((m, i) => (
-              <li key={`${m.tier}-${m.startsAt ?? i}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
+              <li key={`${i}-${m.tier}-${m.startsAt ?? ""}`} className="flex flex-wrap items-center justify-between gap-2 py-2">
                 <span className="font-semibold text-brand-secondary">{TIER_LABEL[m.tier] ?? m.tier}</span>
-                <StatusPill tone={m.status === "active" ? "success" : m.status === "pending" ? "warning" : "neutral"}>{m.status}</StatusPill>
+                <StatusPill tone={m.status === "active" ? "success" : m.status === "pending" ? "warning" : "neutral"}>
+                  <span className="capitalize">{m.status || "unknown"}</span>
+                </StatusPill>
                 <span className="text-xs text-brand-secondary/55">
                   {formatDate(m.startsAt)} → {formatDate(m.expiresAt)}
                 </span>
@@ -188,7 +200,7 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
         ) : (
           <>
             <div className="mt-2 flex flex-wrap gap-2">
-              {Object.entries(listings.byStatus).map(([status, count]) => (
+              {Object.entries(byStatus).map(([status, count]) => (
                 <span key={status} className="bg-brand-tertiary/60 px-2 py-1 text-[11px] font-semibold text-brand-secondary">
                   {LISTING_STATUS_LABEL[status] ?? status}: {count}
                 </span>
@@ -196,10 +208,10 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
             </div>
             <p className="mt-3 text-[11px] text-brand-muted-foreground">5 most recent:</p>
             <ul className="mt-1 divide-y divide-brand-border/70 text-sm">
-              {listings.recent.map((l) => (
+              {recentListings.map((l) => (
                 <li key={l._id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                  <span className="min-w-0 flex-1 truncate font-semibold text-brand-secondary" title={l.title}>
-                    {l.title}
+                  <span className="min-w-0 flex-1 truncate font-semibold text-brand-secondary" title={l.title || undefined}>
+                    {l.title || "Untitled listing"}
                   </span>
                   <span className="text-xs text-brand-secondary/55">
                     {l.city || "—"} · {formatPaise(l.pricePaise)}

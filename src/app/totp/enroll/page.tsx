@@ -18,7 +18,13 @@ import { ROUTES } from "@/lib/routes"
  *  otpauth scheme isn't a standard authority URL. */
 function extractSecret(otpauthUrl: string): string | null {
   const match = /[?&]secret=([^&]+)/.exec(otpauthUrl)
-  return match ? decodeURIComponent(match[1]) : null
+  if (!match) return null
+  // A malformed %-escape throws — never let that blank the enrollment page.
+  try {
+    return decodeURIComponent(match[1])
+  } catch {
+    return match[1]
+  }
 }
 
 /** Groups a base32 secret in 4s so it can be typed without losing your place. */
@@ -82,6 +88,25 @@ export default function TotpEnrollPage() {
     }
     window.addEventListener("beforeunload", warn)
     return () => window.removeEventListener("beforeunload", warn)
+  }, [recoveryCodes, acknowledged])
+
+  // beforeunload only covers refresh/close. The browser Back button is a
+  // client-side navigation: it went to /login, which (session now active)
+  // jumped straight to the dashboard — the codes were gone with no warning.
+  // Park an extra history entry and confirm before letting Back through.
+  useEffect(() => {
+    if (!recoveryCodes || acknowledged) return
+    window.history.pushState({ vxaRecoveryCodes: true }, "", window.location.href)
+    const onPop = () => {
+      if (window.confirm("Leave without saving your recovery codes? They can never be shown again.")) {
+        window.removeEventListener("popstate", onPop)
+        window.history.back()
+      } else {
+        window.history.pushState({ vxaRecoveryCodes: true }, "", window.location.href)
+      }
+    }
+    window.addEventListener("popstate", onPop)
+    return () => window.removeEventListener("popstate", onPop)
   }, [recoveryCodes, acknowledged])
 
   useEffect(() => () => clearTimeout(copyTimer.current), [])

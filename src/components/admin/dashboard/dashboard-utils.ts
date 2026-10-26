@@ -11,9 +11,45 @@ export function isPending(dashboard: Pick<AdminDashboard, "pending"> | undefined
   return dashboard.pending.some((p) => path === p || path.startsWith(`${p}.`))
 }
 
-/** Value for a StatCard: null when the field is pending (→ "Not available yet"). */
-export function pendingOr<T>(dashboard: AdminDashboard | undefined, path: string, value: T): T | null {
-  return isPending(dashboard, path) ? null : value
+/**
+ * Numeric dashboard field by dotted path, or null when it's pending, missing
+ * or not a finite number (→ "Not available yet"). Resolving the path here,
+ * after the pending check, matters: reading `d.leads.last30d` first would
+ * crash the whole page if the backend sends a stubbed parent as null.
+ */
+export function dashValue(dashboard: AdminDashboard | undefined, path: string): number | null {
+  if (!dashboard || isPending(dashboard, path)) return null
+  let node: unknown = dashboard
+  for (const key of path.split(".")) {
+    if (node == null || typeof node !== "object") return null
+    node = (node as Record<string, unknown>)[key]
+  }
+  return typeof node === "number" && Number.isFinite(node) ? node : null
+}
+
+/** Numeric map at `path` (e.g. listings.byStatus), {} when pending / missing / malformed. */
+export function dashCounts(dashboard: AdminDashboard | undefined, path: string): Record<string, number> {
+  if (!dashboard || isPending(dashboard, path)) return {}
+  let node: unknown = dashboard
+  for (const key of path.split(".")) {
+    if (node == null || typeof node !== "object") return {}
+    node = (node as Record<string, unknown>)[key]
+  }
+  if (node == null || typeof node !== "object" || Array.isArray(node)) return {}
+  return Object.fromEntries(
+    Object.entries(node as Record<string, unknown>).filter(([, v]) => typeof v === "number" && Number.isFinite(v)),
+  ) as Record<string, number>
+}
+
+/** Sum of several dashboard paths — null if ANY of them is unavailable (a partial total would look real). */
+export function dashSum(dashboard: AdminDashboard | undefined, paths: string[]): number | null {
+  let total = 0
+  for (const p of paths) {
+    const v = dashValue(dashboard, p)
+    if (v == null) return null
+    total += v
+  }
+  return total
 }
 
 export const TIER_LABEL: Record<string, string> = { mercury: "Mercury", jupiter: "Jupiter", venus: "Venus" }

@@ -14,12 +14,16 @@ export function useIsSuperAdmin() {
  * `Math.round(Number(x) * 100)` is fine for most inputs but this keeps
  * money exact for every one. Returns null for anything that isn't a
  * non-negative rupee amount with at most 2 decimals.
+ *
+ * Commas are only accepted as real thousands separators (Indian "1,00,000"
+ * or Western "100,000") — stripping every comma turned a European-style
+ * "1,5" into ₹15.
  */
 export function rupeesToPaise(input: string): number | null {
-  const cleaned = input.replace(/[,\s₹]/g, "")
-  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(cleaned)
+  const cleaned = input.replace(/[\s₹]/g, "")
+  const match = /^(\d{1,3}(?:,\d{2})*,\d{3}|\d{1,3}(?:,\d{3})+|\d+)(?:\.(\d{1,2}))?$/.exec(cleaned)
   if (!match) return null
-  const paise = Number(match[1]) * 100 + Number((match[2] ?? "").padEnd(2, "0"))
+  const paise = Number(match[1].replace(/,/g, "")) * 100 + Number((match[2] ?? "").padEnd(2, "0"))
   return Number.isSafeInteger(paise) ? paise : null
 }
 
@@ -36,12 +40,13 @@ export function formatPaise(paise: number): string {
   return `₹${(paise / 100).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`
 }
 
+/** Always shown in IST and labelled — the rest of the console (audit log, users) does the same, so times line up. */
 export function formatDateTime(iso?: string | null): string {
   if (!iso) return "—"
   const d = new Date(iso)
   return Number.isNaN(d.getTime())
     ? "—"
-    : d.toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })
+    : `${d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })} IST`
 }
 
 /** Backend message when it's useful, otherwise a readable fallback. */
@@ -54,6 +59,9 @@ export function describeAdminError(error: unknown, fallback: string): string {
     return "Couldn't reach the server — check your connection and try again."
   return getApiErrorMessage(error) ?? fallback
 }
+
+/** Shown wherever isValidDisplayName fails — say what's allowed, not just the length. */
+export const DISPLAY_NAME_RULE = "2–60 characters: letters, digits, spaces and . ' - & / ( )"
 
 /** Letters (any script incl. Indic vowel signs), digits, spaces, `.`, `'`, `-`, `&`, `/`, `(`, `)`; 2–60 chars. */
 export function isValidDisplayName(value: string): boolean {

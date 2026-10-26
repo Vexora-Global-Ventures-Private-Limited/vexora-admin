@@ -20,7 +20,7 @@ import {
   type LocationActivation,
   type LocationType,
 } from "@/store/api/adminApi"
-import { isValidDisplayName, useIsSuperAdmin } from "@/components/admin/config/config-helpers"
+import { DISPLAY_NAME_RULE, isValidDisplayName, useIsSuperAdmin } from "@/components/admin/config/config-helpers"
 import { useDirectWrite } from "@/components/admin/config/amenities-section"
 
 const TYPES: LocationType[] = ["country", "state", "district", "city", "locality"]
@@ -31,6 +31,8 @@ const ACTIVATIONS: { value: LocationActivation; label: string; tone: "success" |
   { value: "inactive", label: "Inactive", tone: "neutral" },
 ]
 const activationOf = (v: LocationActivation) => ACTIVATIONS.find((a) => a.value === v) ?? ACTIVATIONS[2]
+/** Unknown types (if the backend ever adds one) sort last instead of producing NaN. */
+const rankOf = (t: string) => TYPE_RANK[t as LocationType] ?? 99
 
 /** Comma-separated aliases → unique list (case-insensitive), minus any that just repeat the name. */
 function parseAliases(text: string, name = "") {
@@ -63,7 +65,7 @@ export function LocationsSection() {
       .filter((l) => typeFilter === "all" || l.type === typeFilter)
       .filter((l) => activationFilter === "all" || l.activation === activationFilter)
       .filter((l) => !q || (l.displayPath ?? l.name).toLowerCase().includes(q) || (l.aliases ?? []).some((a) => a.toLowerCase().includes(q)))
-      .sort((a, b) => TYPE_RANK[a.type] - TYPE_RANK[b.type] || (a.displayPath ?? a.name).localeCompare(b.displayPath ?? b.name))
+      .sort((a, b) => rankOf(a.type) - rankOf(b.type) || (a.displayPath ?? a.name).localeCompare(b.displayPath ?? b.name))
   }, [locations, query, typeFilter, activationFilter])
 
   const columns: DataTableColumn<AdminLocation>[] = [
@@ -79,7 +81,7 @@ export function LocationsSection() {
         </div>
       ),
     },
-    { key: "type", header: "Type", sortable: true, sortValue: (l) => TYPE_RANK[l.type], render: (l) => <span className="capitalize">{l.type}</span> },
+    { key: "type", header: "Type", sortable: true, sortValue: (l) => rankOf(l.type), render: (l) => <span className="capitalize">{l.type}</span> },
     { key: "aliases", header: "Aliases", render: (l) => <span className="text-xs text-brand-secondary/70">{(l.aliases ?? []).join(", ") || "—"}</span> },
     {
       key: "activation",
@@ -186,19 +188,19 @@ function LocationDialog({ location, all, onClose }: { location?: AdminLocation; 
 
   // A parent must sit higher in the hierarchy (country > state > district > city > locality).
   const parentOptions = all
-    .filter((l) => TYPE_RANK[l.type] < TYPE_RANK[type] && l._id !== location?._id)
-    .sort((a, b) => a.displayPath.localeCompare(b.displayPath))
+    .filter((l) => rankOf(l.type) < rankOf(type) && l._id !== location?._id)
+    .sort((a, b) => (a.displayPath ?? a.name).localeCompare(b.displayPath ?? b.name))
   const parent = all.find((l) => l._id === parentId)
   const aliasList = parseAliases(aliases, name)
   const siblings = all.filter((l) => l._id !== location?._id && (l.parentId ?? "") === (location ? location.parentId ?? "" : parentId))
 
   const nameError = !isValidDisplayName(name)
-    ? "2–60 characters."
+    ? DISPLAY_NAME_RULE
     : siblings.some((l) => l.name.toLowerCase() === name.trim().toLowerCase())
       ? "A location with this name already exists under the same parent."
       : null
   const parentError = !location && type !== "country" && !parentId ? "Pick where this sits in the hierarchy." : null
-  const aliasError = aliasList.some((a) => !isValidDisplayName(a)) ? "Each alias: 2–60 characters, comma-separated." : null
+  const aliasError = aliasList.some((a) => !isValidDisplayName(a)) ? `Each alias (comma-separated): ${DISPLAY_NAME_RULE}.` : null
   const invalid = !!nameError || !!parentError || !!aliasError
   const nothingChanged =
     !!location &&
@@ -275,7 +277,7 @@ function LocationDialog({ location, all, onClose }: { location?: AdminLocation; 
                         )}
                         {parentOptions.map((l) => (
                           <SelectItem key={l._id} value={l._id}>
-                            {l.displayPath} <span className="text-[10px] capitalize opacity-60">({l.type})</span>
+                            {l.displayPath ?? l.name} <span className="text-[10px] capitalize opacity-60">({l.type}{l.activation !== "active" ? ` · ${activationOf(l.activation).label.toLowerCase()}` : ""})</span>
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -290,7 +292,12 @@ function LocationDialog({ location, all, onClose }: { location?: AdminLocation; 
               <Input id="loc-name" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} aria-invalid={touched && !!nameError} className="mt-1" placeholder="e.g. Pune" />
               {touched && nameError && <p className="mt-1 text-xs text-red-600">{nameError}</p>}
               {!location && parent && name.trim() && (
-                <p className="mt-1 text-[11px] text-brand-secondary/55">Will show as: {name.trim()}, {parent.displayPath}</p>
+                <p className="mt-1 text-[11px] text-brand-secondary/55">Will show as: {name.trim()}, {parent.displayPath ?? parent.name}</p>
+              )}
+              {!location && parent && parent.activation !== "active" && (
+                <p className="mt-1 text-[11px] text-amber-700">
+                  Its parent ({parent.name}) isn&apos;t active on the website — check it&apos;s set to Active too, or this place may not appear.
+                </p>
               )}
             </div>
             <div>
