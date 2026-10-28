@@ -209,6 +209,57 @@ export type AuditEntry = {
   createdAt: string
 }
 
+// ── G3 Payment ops ──────────────────────────────────────────────────────────
+// Built by the backend on 2026-10-27 (KNOWN-ISSUES #25). The spec only says
+// "{ orders, page, limit, total }" for the list, so each row is normalised
+// from the fields the backend described (user name/mobile/email, plan,
+// Razorpay refs, minutes stuck) — both `id` and `_id`, nested or flat.
+export type StuckOrder = {
+  id: string
+  status: string
+  purpose: string | null
+  amountPaise: number | null
+  planName: string | null
+  planTier: string | null
+  userId: string | null
+  userName: string | null
+  userMobile: string | null
+  userEmail: string | null
+  razorpayOrderId: string | null
+  razorpayPaymentId: string | null
+  createdAt: string | null
+  minutesStuck: number | null
+}
+
+type RawRecord = Record<string, unknown>
+const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null)
+const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null)
+const rec = (v: unknown): RawRecord => (v && typeof v === "object" ? (v as RawRecord) : {})
+
+function toStuckOrder(raw: RawRecord): StuckOrder {
+  const user = rec(raw.user ?? raw.userId)
+  const plan = rec(raw.plan ?? raw.planId)
+  const createdAt = str(raw.createdAt)
+  const minutes =
+    num(raw.minutesStuck) ?? (createdAt ? Math.floor((Date.now() - new Date(createdAt).getTime()) / 60_000) : null)
+  return {
+    id: str(raw.id) ?? str(raw._id) ?? str(raw.orderId) ?? "",
+    status: str(raw.status) ?? "processing",
+    purpose: str(raw.purpose),
+    amountPaise: num(raw.amountPaise),
+    planName: str(plan.name) ?? str(raw.planName),
+    planTier: str(plan.tier) ?? str(raw.tier),
+    userId: str(user.id) ?? str(user._id) ?? str(raw.userId),
+    userName: str(user.name) ?? str(user.fullName) ?? str(raw.userName),
+    userMobile: str(user.mobile) ?? str(raw.userMobile),
+    userEmail: str(user.email) ?? str(raw.userEmail),
+    razorpayOrderId: str(raw.razorpayOrderId),
+    razorpayPaymentId: str(raw.razorpayPaymentId),
+    createdAt,
+    minutesStuck: minutes,
+  }
+}
+
 export const adminApi = baseApi.injectEndpoints({
   endpoints: (builder) => ({
     // G1
@@ -339,6 +390,30 @@ export const adminApi = baseApi.injectEndpoints({
       }),
       transformResponse: (res: { data: AbuseResolveResult }) => res.data,
       invalidatesTags: ["Abuse", "Dashboard", "Users", "ListingQueue", "Audit"],
+    }),
+
+    // G3 — orders in `processing` (verify succeeded, webhook never arrived).
+    getStuckOrders: builder.query<{ orders: StuckOrder[]; page: number; limit: number; total: number }, { olderThanMinutes?: number; page?: number; limit?: number }>({
+      query: ({ olderThanMinutes, page, limit }) => ({
+        url: "/api/v1/admin/payment-ops/stuck",
+        params: params({ olderThanMinutes, page, limit }),
+      }),
+      transformResponse: (res: { data: { orders?: RawRecord[]; page?: number; limit?: number; total?: number } }) => {
+        const orders = (res.data?.orders ?? []).map(toStuckOrder)
+        return { orders, page: res.data?.page ?? 1, limit: res.data?.limit ?? orders.length, total: res.data?.total ?? orders.length }
+      },
+      providesTags: ["PaymentOps"],
+    }),
+    // ⚠ step-up. Same ActivationService as the webhook; idempotent server-side.
+    // razorpayPaymentId is optional only for a ₹0 order.
+    activateStuckOrder: builder.mutation<RawRecord, { id: string; note: string; razorpayPaymentId?: string }>({
+      query: ({ id, note, razorpayPaymentId }) => ({
+        url: `/api/v1/admin/payment-ops/orders/${id}/activate`,
+        method: "POST",
+        body: { note, ...(razorpayPaymentId ? { razorpayPaymentId } : {}) },
+      }),
+      transformResponse: (res: { data: RawRecord }) => res.data,
+      invalidatesTags: ["PaymentOps", "Dashboard", "Users", "Audit"],
     }),
 
     // G8 config — any admin reads; writes are super_admin + ⚠ step-up.
@@ -474,6 +549,8 @@ export const {
   useDeactivateAdPackageMutation,
   useGetAbuseReportsQuery,
   useResolveAbuseReportMutation,
+  useGetStuckOrdersQuery,
+  useActivateStuckOrderMutation,
   useGetConfigQuery,
   usePutConfigMutation,
   useDeleteConfigMutation,

@@ -27,11 +27,10 @@ export function PlatformConfigSection() {
   const [query, setQuery] = useState("")
   const [adding, setAdding] = useState(false)
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const sorted = [...(entries ?? [])].sort((a, b) => a._id.localeCompare(b._id))
-    return q ? sorted.filter((e) => e._id.toLowerCase().includes(q) || (e.description ?? "").toLowerCase().includes(q)) : sorted
-  }, [entries, query])
+  const sorted = useMemo(() => [...(entries ?? [])].sort((a, b) => a._id.localeCompare(b._id)), [entries])
+  const q = query.trim().toLowerCase()
+  const matches = (e: (typeof sorted)[number]) => !q || e._id.toLowerCase().includes(q) || (e.description ?? "").toLowerCase().includes(q)
+  const matchCount = sorted.filter(matches).length
 
   return (
     <section aria-labelledby="platform-config-heading" className="space-y-4">
@@ -80,15 +79,19 @@ export function PlatformConfigSection() {
         </div>
       )}
 
-      {entries && filtered.length === 0 && (
+      {entries && matchCount === 0 && (
         <p className="border border-dashed border-brand-border p-6 text-center text-sm text-brand-secondary/55">
           {query ? `No keys match “${query}”.` : "No config keys yet."}
         </p>
       )}
 
+      {/* Rows that don't match the search are hidden, not unmounted — an
+          unsaved edit in a row must survive typing in the search box. */}
       <div className="space-y-2.5">
-        {filtered.map((entry) => (
-          <ConfigField key={entry._id} entry={entry} canEdit={canEdit} />
+        {sorted.map((entry) => (
+          <div key={entry._id} hidden={!matches(entry)}>
+            <ConfigField entry={entry} canEdit={canEdit} />
+          </div>
         ))}
       </div>
 
@@ -144,7 +147,7 @@ function AddConfigDialog({ existingKeys, onClose }: { existingKeys: Set<string>;
 
   return (
     <>
-      <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <Dialog open onOpenChange={(o) => !o && !isLoading && !stepUp.open && onClose()}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Add a config key</DialogTitle>
@@ -201,7 +204,7 @@ function AddConfigDialog({ existingKeys, onClose }: { existingKeys: Set<string>;
             </div>
           </div>
           <DialogFooter>
-            <Button variant="ghost" onClick={onClose} disabled={isLoading}>
+            <Button variant="ghost" onClick={onClose} disabled={isLoading || stepUp.open}>
               Cancel
             </Button>
             <Button onClick={submit} disabled={isLoading || stepUp.open} className="btn-gold">

@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation"
 import {
   LayoutDashboard, Users, Wallet, Building2, BadgeCheck,
   Megaphone, SlidersHorizontal, ShieldAlert, Receipt, BarChart3,
-  MessageSquareText,
+  MessageSquareText, UserCog,
 } from "lucide-react"
 import { AdminShell, type AdminNavItem } from "@/components/admin/admin-shell"
 import { useAdminGuard } from "@/lib/use-admin-guard"
@@ -32,6 +32,9 @@ const NAV_ITEMS: AdminNavItem[] = [
   { id: "config", label: "Platform config", icon: SlidersHorizontal, href: ROUTES.config },
   { id: "abuse", label: "Abuse queue", icon: ShieldAlert, href: ROUTES.abuse, roles: MODERATION_ROLES },
   { id: "payments", label: "Payments & audit", icon: Receipt, href: ROUTES.payments },
+  // super_admin only — reset-2fa is requireRole("super_admin"); an empty
+  // roles list hides it from every other role (canSee lets super_admin through).
+  { id: "admins", label: "Admins", icon: UserCog, href: ROUTES.admins, roles: [] },
 ]
 
 function canSee(item: AdminNavItem, role: AdminRole) {
@@ -50,6 +53,7 @@ const TOPBAR_SUBTITLE: Record<string, string> = {
   config: "Live-edit pricing & quotas — G8",
   abuse: "48h SLA resolution queue — G9",
   payments: "Payment log & audit trail — G10",
+  admins: "Admin accounts & two-factor recovery",
 }
 
 export default function PortalLayout({ children }: { children: React.ReactNode }) {

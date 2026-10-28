@@ -1,6 +1,6 @@
 "use client"
 
-import { useId, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { toast } from "sonner"
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Loader2, RotateCcw, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -70,6 +70,13 @@ export default function AbusePage() {
   const [submittingId, setSubmittingId] = useState<string | null>(null)
   const [resolving, setResolving] = useState<AbuseReport | null>(null)
   const [lastResult, setLastResult] = useState<AbuseResolveResult | null>(null)
+  // "Breached" is computed against the clock at render time — re-render once a
+  // minute so a report crossing its SLA deadline is flagged without a refetch.
+  const [, setClockTick] = useState(0)
+  useEffect(() => {
+    const t = setInterval(() => setClockTick((n) => n + 1), 60_000)
+    return () => clearInterval(t)
+  }, [])
 
   const reports = data?.reports ?? []
   const totalPages = data ? Math.max(1, Math.ceil(data.total / PAGE_SIZE)) : 1
@@ -176,7 +183,7 @@ export default function AbusePage() {
       header: "Actions",
       render: (r) =>
         isClosed(r) ? null : (
-          <Button size="sm" disabled={submittingId === r._id} onClick={() => setResolving(r)} className="gap-1">
+          <Button size="sm" disabled={submittingId === r._id || stepUp.open} onClick={() => setResolving(r)} className="gap-1">
             {submittingId === r._id && <Loader2 className="h-3.5 w-3.5 animate-spin" />} Resolve
           </Button>
         ),
@@ -224,7 +231,16 @@ export default function AbusePage() {
           pageSize={PAGE_SIZE}
           emptyLabel={statusFilter === NEEDS_ACTION ? "Nothing needs action — no open or in-review reports." : `No ${statusFilter.replace(/_/g, " ")} reports.`}
         />
-        {data && data.total > PAGE_SIZE && (
+        {data && reports.length === 0 && page > 1 && (
+          <p className="text-xs text-brand-secondary/60">
+            Nothing on page {page} any more — reports were closed in the meantime.{" "}
+            <button type="button" className="font-semibold underline" onClick={() => setPage(1)}>
+              Go to page 1
+            </button>
+          </p>
+        )}
+        {/* Also shown on page > 1 when the total has since dropped, so the admin is never stranded. */}
+        {data && (data.total > PAGE_SIZE || page > 1) && (
           <div className="flex items-center justify-between text-xs text-brand-muted-foreground">
             <span>
               Page {page} of {totalPages} · {data.total} reports
@@ -245,7 +261,7 @@ export default function AbusePage() {
         <ResolveDialog
           key={resolving._id}
           report={resolving}
-          submitting={submittingId === resolving._id}
+          submitting={submittingId === resolving._id || stepUp.open}
           onClose={() => setResolving(null)}
           onSubmit={submit}
         />

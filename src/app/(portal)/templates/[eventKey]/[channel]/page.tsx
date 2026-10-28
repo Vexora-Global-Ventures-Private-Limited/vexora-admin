@@ -1,6 +1,6 @@
 "use client"
 
-import { use, useRef, useState } from "react"
+import { use, useEffect, useRef, useState } from "react"
 import { Eye, RotateCcw, Save, ServerCog } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -27,13 +27,16 @@ import { useStepUp } from "@/lib/use-step-up"
 import { ROUTES } from "@/lib/routes"
 import { describeAdminError, formatDateTime, useIsSuperAdmin } from "@/components/admin/config/config-helpers"
 import {
-  BODY_MAX, SUBJECT_MAX, WHATSAPP_NAME_PATTERN, channelLabel, renderDraft, sampleValue, usedVariables,
+  BODY_MAX, SUBJECT_MAX, WHATSAPP_NAME_PATTERN, channelLabel, malformedPlaceholders, renderDraft, sampleValue, usedVariables,
 } from "@/components/admin/templates/template-helpers"
 
 export default function TemplateEditorPage({ params }: { params: Promise<{ eventKey: string; channel: string }> }) {
   const raw = use(params)
-  const eventKey = decodeURIComponent(raw.eventKey)
-  const channel = decodeURIComponent(raw.channel)
+  // A malformed %-sequence in a hand-edited URL would make
+  // decodeURIComponent throw and crash the page — fall back to the raw value
+  // (which then just shows "not found").
+  const eventKey = safeDecode(raw.eventKey)
+  const channel = safeDecode(raw.channel)
   const { data: events, isLoading, isError, refetch, isFetching } = useGetTemplatesQuery()
 
   const event = events?.find((e) => e.eventKey === eventKey)
@@ -59,6 +62,14 @@ export default function TemplateEditorPage({ params }: { params: Promise<{ event
   )
 }
 
+function safeDecode(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 function TemplateEditor({ event, channel, template }: { event: TemplateEvent; channel: string; template: TemplateVersion }) {
   const canEdit = useIsSuperAdmin()
   const bodyRef = useRef<HTMLTextAreaElement>(null)
@@ -82,6 +93,7 @@ function TemplateEditor({ event, channel, template }: { event: TemplateEvent; ch
   const allowed = event.variables
   const used = usedVariables(`${subject} ${body}`)
   const unknown = allowed ? used.filter((v) => !allowed.includes(v)) : []
+  const malformed = malformedPlaceholders(`${subject} ${body}`)
   const previewVars = Array.from(new Set([...(allowed ?? []), ...used]))
 
   const errors = [
@@ -92,6 +104,8 @@ function TemplateEditor({ event, channel, template }: { event: TemplateEvent; ch
     // current one" — so an existing subject can't actually be cleared.
     isEmail && !!base.subject && !subject.trim() && "An existing subject can't be removed — enter a subject.",
     isWhatsapp && !WHATSAPP_NAME_PATTERN.test(waName) && "WhatsApp needs its approved template name (lowercase letters, digits, underscores).",
+    malformed.length > 0 &&
+      `Not a valid placeholder: ${malformed.join(", ")} — use {{name}} with letters, digits, _ or . only; it would be sent as literal text.`,
     unknown.length > 0 && `Unknown variable${unknown.length > 1 ? "s" : ""}: ${unknown.map((v) => `{{${v}}}`).join(", ")} — this event only provides the ones listed.`,
   ].filter(Boolean) as string[]
 
@@ -110,6 +124,17 @@ function TemplateEditor({ event, channel, template }: { event: TemplateEvent; ch
   }
   const newerOnServer = template.id !== base.id || template.version !== base.version
   if (newerOnServer && (adoptNext || !dirty)) adopt(template)
+
+  // Leaving with unsaved copy (closing the tab, reloading) asks first.
+  useEffect(() => {
+    if (!dirty || adoptNext) return
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ""
+    }
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [dirty, adoptNext])
 
   const insertVariable = (name: string) => {
     const el = bodyRef.current
@@ -131,7 +156,8 @@ function TemplateEditor({ event, channel, template }: { event: TemplateEvent; ch
     try {
       const vars = Object.fromEntries(Object.entries(samples).filter(([, v]) => v.trim()))
       const res = await previewTemplate({ id: base.id, variables: vars }).unwrap()
-      setServerPreview({ title: res.title, body: res.body })
+      // Rendered as text either way — coerce in case the server ever returns a non-string.
+      setServerPreview({ title: res.title == null ? undefined : String(res.title), body: String(res.body ?? "") })
     } catch (err) {
       toast.error("Couldn't load the live preview", { description: describeAdminError(err, "Please try again.") })
     }
@@ -244,8 +270,15 @@ function TemplateEditor({ event, channel, template }: { event: TemplateEvent; ch
 
         {canEdit && (
           <div className="mt-5 flex flex-wrap gap-2">
-            <Button onClick={() => setConfirming(true)} disabled={!dirty || errors.length > 0 || isSaving || stepUp.open || newerOnServer} className="btn-gold gap-1.5">
-              <Save className="h-4 w-4" /> {isSaving ? "Saving…" : `Save as v${base.version + 1}`}
+            {/* adoptNext: our save succeeded but the new version hasn't been
+                refetched yet — the draft still looks dirty, so a second click
+                would save the same text again as yet another version. */}
+            <Button
+              onClick={() => setConfirming(true)}
+              disabled={!dirty || errors.length > 0 || isSaving || stepUp.open || newerOnServer || adoptNext}
+              className="btn-gold gap-1.5"
+            >
+              <Save className="h-4 w-4" /> {isSaving ? "Saving…" : adoptNext ? "Saved — refreshing…" : `Save as v${base.version + 1}`}
             </Button>
             {dirty && (
               <Button variant="ghost" onClick={reset} disabled={isSaving} className="gap-1.5">

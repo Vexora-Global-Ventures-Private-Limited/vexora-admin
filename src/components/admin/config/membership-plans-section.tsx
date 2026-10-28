@@ -27,7 +27,7 @@ import {
 import { useStepUp } from "@/lib/use-step-up"
 import { getApiErrorCode } from "@/lib/api-error"
 import {
-  describeAdminError, formatDateTime, formatPaise, isValidDisplayName, paiseToRupeesInput, rupeesToPaise, useIsSuperAdmin,
+  describeAdminError, formatDateTime, formatPaise, DISPLAY_NAME_RULE, isValidDisplayName, paiseToRupeesInput, rupeesToPaise, useIsSuperAdmin,
 } from "@/components/admin/config/config-helpers"
 
 type Tier = AdminMembershipPlan["tier"]
@@ -61,7 +61,7 @@ function validate(form: PlanForm) {
   const durationDays = /^\d+$/.test(form.durationDays.trim()) ? Number(form.durationDays) : NaN
   const listingQuota = /^\d+$/.test(form.listingQuota.trim()) ? Number(form.listingQuota) : NaN
   const errors: Partial<Record<keyof PlanForm, string>> = {}
-  if (!isValidDisplayName(form.name)) errors.name = "2–60 characters."
+  if (!isValidDisplayName(form.name)) errors.name = DISPLAY_NAME_RULE
   if (pricePaise === null || pricePaise > MAX_PRICE_PAISE) errors.price = "Enter a price in ₹ (0 for free), up to 2 decimals."
   if (!(durationDays >= 1 && durationDays <= 3650)) errors.durationDays = "1–3650 days."
   if (!(listingQuota >= 0 && listingQuota <= 10000)) errors.listingQuota = "0–10000 listings."
@@ -80,6 +80,9 @@ export function MembershipPlansSection() {
 
   const sorted = [...(plans ?? [])].sort((a, b) => TIER_ORDER[a.tier] - TIER_ORDER[b.tier] || b.version - a.version)
   const missingTiers = TIERS.filter((t) => !(plans ?? []).some((p) => p.tier === t))
+  // If a versioned edit ever leaves the old version active too, vexora-web
+  // would offer two prices for one tier — surface it instead of hiding it.
+  const duplicateActiveTiers = TIERS.filter((t) => (plans ?? []).filter((p) => p.tier === t && p.isActive).length > 1)
 
   const toggleActive = (plan: AdminMembershipPlan) => {
     setToggling(null)
@@ -166,6 +169,12 @@ export function MembershipPlansSection() {
           <button onClick={() => refetch()} disabled={isFetching} className="font-semibold underline">
             Retry
           </button>
+        </div>
+      )}
+      {duplicateActiveTiers.length > 0 && (
+        <div role="alert" className="border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          More than one <b>active</b> plan for {duplicateActiveTiers.join(", ")} — vexora-web may show two prices for the same tier.
+          Deactivate the outdated version.
         </div>
       )}
       {plans && <DataTable columns={columns} rows={sorted} rowKey={(p) => p._id} emptyLabel="No membership plans yet." />}

@@ -1,4 +1,5 @@
 import { createApi, fetchBaseQuery } from "@reduxjs/toolkit/query/react"
+import { rememberReturnTo } from "@/lib/return-to"
 import type { BaseQueryFn, FetchArgs, FetchBaseQueryError } from "@reduxjs/toolkit/query/react"
 import { clearAccessToken, getAccessToken } from "@/lib/admin-tokens"
 import { getApiErrorCode } from "@/lib/api-error"
@@ -58,6 +59,7 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
       // Say why (the login page shows it), and never bounce someone who's
       // already on the sign-in screens — that would wipe a half-typed login.
       if (typeof window !== "undefined" && !/^\/(login|totp)/.test(window.location.pathname)) {
+        rememberReturnTo()
         window.location.replace(`${ROUTES.login}?session=expired`)
       }
     }
@@ -82,6 +84,7 @@ export const baseApi = createApi({
     "Locations",
     "Templates",
     "Audit",
+    "PaymentOps",
   ],
   endpoints: () => ({}),
 })

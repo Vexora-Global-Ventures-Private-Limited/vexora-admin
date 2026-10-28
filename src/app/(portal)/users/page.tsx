@@ -41,7 +41,8 @@ function UsersList() {
   const setParams = useSetUrlParams()
   const canManage = useCanManageUsers()
 
-  const qParam = searchParams.get("q") ?? ""
+  // Capped like the input — a hand-edited URL can't send a 10k-char search.
+  const qParam = (searchParams.get("q") ?? "").slice(0, SEARCH_MAX)
   const statusParam = searchParams.get("status")
   const status = STATUSES.includes(statusParam as AdminUserStatus) ? (statusParam as AdminUserStatus) : undefined
   const page = parsePage(searchParams.get("page"))

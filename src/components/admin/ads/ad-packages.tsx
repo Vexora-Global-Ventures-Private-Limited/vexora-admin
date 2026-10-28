@@ -86,7 +86,10 @@ export function AdPackagesSection() {
   const [deactivatePkg] = useDeactivateAdPackageMutation()
   const stepUp = useStepUp()
   const lock = useRef(false)
-  const [saving, setSaving] = useState(false)
+  const [savingRequest, setSaving] = useState(false)
+  // Writes are also blocked while the step-up dialog waits: stepUp.run only
+  // queues one action, so a second click would be silently ignored.
+  const saving = savingRequest || stepUp.open
   const [editing, setEditing] = useState<AdPackage | "new" | null>(null)
   const [deactivating, setDeactivating] = useState<AdPackage | null>(null)
   const [showInactive, setShowInactive] = useState(false)
@@ -357,7 +360,7 @@ function PackageDialog({
           <DialogTitle className="font-serif text-xl">{pkg ? "Edit package" : "New ad package"}</DialogTitle>
           <DialogDescription>
             {pkg
-              ? `Changing price or duration saves a new version (v${pkg.version + 1}); the current one is deactivated automatically.`
+              ? `Changing price or duration saves a new version (v${pkg.version + 1}) and the current one is deactivated automatically. A name-only change may update it in place — the result is reported after saving.`
               : "Offered to sellers immediately after saving."}
           </DialogDescription>
         </DialogHeader>

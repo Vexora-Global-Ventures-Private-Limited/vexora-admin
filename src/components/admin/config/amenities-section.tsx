@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { Pencil, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -14,7 +14,7 @@ import { StatusPill } from "@/components/admin/status-pill"
 import { TotpStepUpDialog } from "@/components/admin/totp-step-up-dialog"
 import { useCreateAmenityMutation, useGetAmenitiesQuery, useUpdateAmenityMutation, type Amenity } from "@/store/api/adminApi"
 import { isStepUpRequired, useStepUp } from "@/lib/use-step-up"
-import { describeAdminError, isValidDisplayName, useIsSuperAdmin } from "@/components/admin/config/config-helpers"
+import { describeAdminError, DISPLAY_NAME_RULE, isValidDisplayName, useIsSuperAdmin } from "@/components/admin/config/config-helpers"
 
 const ICON_PATTERN = /^[a-z][a-z0-9_]{1,39}$/
 
@@ -25,7 +25,12 @@ const ICON_PATTERN = /^[a-z][a-z0-9_]{1,39}$/
  */
 export function useDirectWrite() {
   const stepUp = useStepUp()
+  // Synchronous lock: RTK's isLoading only flips on the next render, so a
+  // fast double-click on "Add" could otherwise create the record twice.
+  const inFlight = useRef(false)
   const write = async (action: () => Promise<unknown>, done: { success: string; error: string; after?: () => void }) => {
+    if (inFlight.current || stepUp.open) return
+    inFlight.current = true
     const onSuccess = () => {
       toast.success(done.success, { description: "Audit-logged." })
       done.after?.()
@@ -37,6 +42,8 @@ export function useDirectWrite() {
     } catch (err) {
       if (isStepUpRequired(err)) stepUp.run(action, { onSuccess, onError })
       else onError(err)
+    } finally {
+      inFlight.current = false
     }
   }
   return { write, stepUp }
@@ -78,7 +85,7 @@ export function AmenitiesSection() {
           <Switch
             checked={a.isActive}
             onCheckedChange={() => toggle(a)}
-            disabled={!!busyId || isUpdating}
+            disabled={!!busyId || isUpdating || stepUp.open}
             aria-label={`${a.name}: ${a.isActive ? "shown" : "hidden"}`}
           />
         ) : (
@@ -161,7 +168,7 @@ function AmenityDialog({
   const busy = isCreating || isUpdating || stepUp.open
 
   const nameError = !isValidDisplayName(name)
-    ? "2–60 characters."
+    ? DISPLAY_NAME_RULE
     : existingNames.has(name.trim().toLowerCase())
       ? "An amenity with this name already exists."
       : null

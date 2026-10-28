@@ -134,12 +134,23 @@ export function useStepUp() {
     setRecoveryCode("")
   }
 
+  // Typing a new code clears the last error, like the sign-in screens do —
+  // otherwise "That code isn't valid" lingered under a correct new code.
+  const typeCode = (value: string) => {
+    setCode(value)
+    setError("")
+  }
+  const typeRecoveryCode = (value: string) => {
+    setRecoveryCode(value)
+    setError("")
+  }
+
   return {
     open: pendingAction !== null,
     code,
-    setCode,
+    setCode: typeCode,
     recoveryCode,
-    setRecoveryCode,
+    setRecoveryCode: typeRecoveryCode,
     mode,
     setMode,
     run,

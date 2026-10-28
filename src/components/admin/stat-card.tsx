@@ -37,10 +37,11 @@ export function StatCard({ label, value, icon: Icon, prefix, suffix, decimals, h
         </div>
         <div className="mt-2 font-serif text-2xl font-bold text-brand-secondary">
           {loading ? (
-            <span className="inline-block h-7 w-20 animate-pulse bg-brand-tertiary" aria-label="Loading" />
+            <span className="inline-block h-7 w-20 animate-pulse bg-brand-tertiary" role="status" aria-label={`Loading ${label}`} />
           ) : value == null ? (
             <span className="font-sans text-sm font-semibold text-brand-muted-foreground">Not available yet</span>
           ) : (
+            // AnimatedCounter formats with Indian digit grouping (12,34,567), like the rest of the console.
             <AnimatedCounter to={value} prefix={prefix} suffix={suffix} decimals={decimals} />
           )}
         </div>

@@ -53,9 +53,14 @@ function QueueStatus({
         title={`${title} — the backend now responds`}
         message="This queue returned data instead of “not implemented”. The review screen hasn't been built against the real response yet — nothing can be approved from here until it is."
       >
-        <pre className="mx-auto mt-4 max-h-48 max-w-full overflow-auto bg-brand-tertiary/40 p-3 text-left text-[10px]">
-          {JSON.stringify(data, null, 2).slice(0, 2000)}
-        </pre>
+        {/* Children are built before QueryState picks a branch, so this runs
+            while loading too (data still undefined) — guard it, or
+            JSON.stringify(undefined).slice crashes the page. */}
+        {data !== undefined && (
+          <pre className="mx-auto mt-4 max-h-48 max-w-full overflow-auto bg-brand-tertiary/40 p-3 text-left text-[10px]">
+            {(JSON.stringify(data, null, 2) ?? String(data)).slice(0, 2000)}
+          </pre>
+        )}
       </NotAvailableYet>
     </QueryState>
   )
