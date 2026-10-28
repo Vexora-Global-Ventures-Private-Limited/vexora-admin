@@ -21,8 +21,8 @@ Every frontend-fixable bug found in the same review (about 180 across two review
 |---|---|---|---|
 | 1 | `GET /admin/kyc/queue` | KYC & badges | "G5 KYC review is built in Stage 13" — not deployed on dev (the consumer KYC endpoints are missing too) |
 | 2 | `GET /admin/badges/queues` | KYC & badges | Same — Stage 13 |
-| 3 | `GET /admin/payment-ops/stuck` | Payment ops | "G3 payment ops is built in Stage 9" — still the Stage 8 stub |
-| 4 | `POST /admin/payment-ops/orders/{id}/activate` | Payment ops | **Never built** (`KNOWN-ISSUES.md` #25). The activation service supports `admin_manual`, but no route calls it — so on dev no purchase can ever complete (orders stay `processing`), which blocks testing every paid-tier flow on vexora-web |
+| 3 | ~~`GET /admin/payment-ops/stuck`~~ | Payment ops | **Solved 2026-10-27:** live on vex-dev; wired into the Payment ops page |
+| 4 | ~~`POST /admin/payment-ops/orders/{id}/activate`~~ | Payment ops | **Solved 2026-10-27:** live on vex-dev (step-up, audited, idempotent); Activate dialog on the Payment ops page |
 | 5 | `GET /admin/payments`, `POST /admin/payments/{id}/refund-note` | Payments | "G10 payment log is built in Stage 9" |
 
 ## B. Backend bugs & validation gaps
@@ -83,7 +83,7 @@ Every frontend-fixable bug found in the same review (about 180 across two review
 |---|---|---|
 | 48 | Admin TOTP is real (no demo code): live testing of ⚠ step-up actions needs a fresh code from the admin's authenticator every 15 minutes | Admin — consider a second dev admin account for testing |
 | 49 | Dev credentials for the seeded admin are committed in `vexora-docs/PARTNER-AUTH-INTEGRATION.md` ("rotate before production") | Rotate before production |
-| 50 | All 7 seeded WhatsApp templates have `whatsappTemplateName: null`, so WhatsApp notifications can't be sent; every template body is a seed placeholder ("Default template for … on email") | Ops / Product — real BSP-approved template names + real copy |
+| 50 | All 7 seeded WhatsApp templates have `whatsappTemplateName: null`, so WhatsApp notifications can't be sent; every template body is a seed placeholder ("Default template for … on email") — and users see them: since 2026-10-27 every new account gets an `auth.welcome` in-app notification reading "Auth Welcome — Default template for auth.welcome on in_app". vexora-web now swaps placeholder text for readable copy, but the real fix is writing the templates in the admin **Templates** screen (needs a fresh authenticator code) | Ops / Product — real BSP-approved template names + real copy |
 | 51 | Documented step-up rules, verified live 2026-10-25: suspend, config writes, membership-plan writes, ad-package writes, listing extend/remove, abuse resolve **require** a fresh code; reinstate, listing/ad approve-reject, amenity and location writes **don't** | Backend docs — add to `06-API.md` so it's not guesswork |
 | 52 | Dev has 4 duplicate active "Test Package" pairs (left by the package-versioning bug, #7) | Admin — one click on "Deactivate older versions" in Ad approval → Packages |
 | 53 | Only one admin account exists (`super_admin`), so role-based screens (ops / finance / moderator) and multi-admin flows can't be tested | Admin — create one test account per role on dev |
