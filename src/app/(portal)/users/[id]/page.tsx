@@ -7,6 +7,7 @@ import { StatusPill } from "@/components/admin/status-pill"
 import { DetailBackLink, DetailCard } from "@/components/admin/detail-page-shell"
 import { NotFoundCard } from "@/components/admin/not-found-card"
 import { UserStatusAction } from "@/components/admin/users/user-status-action"
+import { UserBadgeCard } from "@/components/admin/users/user-badge-card"
 import { isObjectId, USER_STATUS_LABEL, userLabel, userStatusTone } from "@/components/admin/users/user-utils"
 import { formatCount, formatDate, formatDateTime, formatPaise, LISTING_STATUS_LABEL, TIER_LABEL } from "@/components/admin/dashboard/dashboard-utils"
 import { useGetUserQuery } from "@/store/api/adminApi"
@@ -143,6 +144,8 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
           </div>
         </dl>
       </DetailCard>
+
+      <UserBadgeCard userId={user.id} label={userLabel(user)} />
 
       <DetailCard>
         <h3 className="font-serif text-base font-bold text-brand-secondary">Profile</h3>

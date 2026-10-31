@@ -44,9 +44,9 @@ function canSee(item: AdminNavItem, role: AdminRole) {
 const TOPBAR_SUBTITLE: Record<string, string> = {
   dashboard: "Platform-wide health & pending approvals — G1",
   users: "Search, suspend & reinstate — G2",
-  "payment-ops": "Stuck orders & manual activation — G3",
+  "payment-ops": "Stuck orders: activate or reject — G3",
   listings: "Approve · reject · extend · remove — G4",
-  kyc: "KYC review + Verified / Featured badges — G5",
+  kyc: "KYC review + Verified / Verified Developer badges — G5",
   ads: "Creative review vs. slot specs — G6",
   templates: "Notification copy per event × channel, versioned — G7",
   reports: "Platform analytics & exportable summaries — G11",

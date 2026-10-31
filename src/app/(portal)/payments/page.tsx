@@ -1,19 +1,18 @@
 "use client"
 
 import Link from "next/link"
-import { ScrollText } from "lucide-react"
-import { BackendPendingCard } from "@/components/admin/dashboard/backend-pending-card"
-import { useProbePaymentsQuery } from "@/components/admin/dashboard/pending-endpoints"
+import { ScrollText, Wallet } from "lucide-react"
+import { NotAvailableYet } from "@/components/admin/moderation/shared"
 import { useAdminSession } from "@/lib/admin-session"
 import { ROUTES } from "@/lib/routes"
 
 /**
- * G10 — payment log + manual refund notes. GET /admin/payments (and the
- * refund-note route) are still 501 placeholders on the backend, so no
- * payment rows or note actions are shown. The audit log is real.
+ * G10 — payment log + manual refund notes. GET /admin/payments was a 501
+ * placeholder and has been dropped from the API spec (2026-10-31), and the
+ * refund-note route was never built — so nothing is requested here. Stuck
+ * orders (activate / reject) live in Payment ops; the audit log is real.
  */
 export default function PaymentsPage() {
-  const { data, error, isLoading, refetch } = useProbePaymentsQuery()
   const isSuperAdmin = useAdminSession((s) => s.adminUser?.role === "super_admin")
 
   return (
@@ -26,14 +25,14 @@ export default function PaymentsPage() {
           </Link>
         )}
       </div>
-      <BackendPendingCard
-        title="Payment log isn't available yet"
-        description="The backend hasn't built the payment log or refund notes (Stage 9). Payments still happen — they just can't be listed here yet."
-        isLoading={isLoading}
-        error={error}
-        data={data}
-        onRetry={refetch}
-      />
+      <NotAvailableYet
+        title="Payment log isn't available"
+        message="The backend has no payment-log or refund-note API — the old placeholder was removed from the API. Payments still happen; they just can't be listed here."
+      >
+        <Link href={ROUTES.paymentOps} className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-brand-primary-dark hover:underline">
+          <Wallet className="h-3.5 w-3.5" aria-hidden /> Stuck orders are in Payment ops →
+        </Link>
+      </NotAvailableYet>
     </div>
   )
 }

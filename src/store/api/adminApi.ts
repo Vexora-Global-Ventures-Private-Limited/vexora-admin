@@ -229,6 +229,35 @@ export type StuckOrder = {
   razorpayPaymentId: string | null
   createdAt: string | null
   minutesStuck: number | null
+  /**
+   * Live view from Razorpay's API (fetched by the backend on every list
+   * call). undefined = the backend didn't send it; null = a free (₹0)
+   * order that never existed on Razorpay.
+   */
+  live: RazorpayLive | null | undefined
+}
+
+export type RazorpayPayment = {
+  id: string
+  /** created | authorized | captured | refunded | failed */
+  status: string
+  method: string | null
+  /** Bank / UPI id / wallet / card network + last 4 — whatever applies. */
+  detail: string | null
+  amountPaise: number | null
+  feePaise: number | null
+  error: string | null
+  refundStatus: string | null
+  createdAt: string | null
+}
+
+export type RazorpayLive = {
+  /** Razorpay order status: created | attempted | paid */
+  orderStatus: string | null
+  amountPaidPaise: number | null
+  payments: RazorpayPayment[]
+  /** Set when the backend couldn't reach Razorpay for this order. */
+  fetchError: string | null
 }
 
 type RawRecord = Record<string, unknown>
@@ -236,7 +265,57 @@ const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null)
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null)
 const rec = (v: unknown): RawRecord => (v && typeof v === "object" ? (v as RawRecord) : {})
 
+// Razorpay timestamps are unix seconds; the backend may pass ISO strings.
+const when = (v: unknown) => (typeof v === "number" ? new Date(v * 1000).toISOString() : str(v))
+
+function toRazorpayPayment(raw: RawRecord): RazorpayPayment {
+  const card = rec(raw.card)
+  const upi = rec(raw.upi)
+  const acquirer = rec(raw.acquirer_data ?? raw.acquirerData)
+  const cardText = [str(card.network), str(card.last4) ? `•••• ${str(card.last4)}` : null].filter(Boolean).join(" ")
+  return {
+    id: str(raw.id) ?? str(raw.paymentId) ?? str(raw.razorpayPaymentId) ?? "",
+    status: str(raw.status) ?? "unknown",
+    method: str(raw.method),
+    detail:
+      str(raw.vpa) ?? str(upi.vpa) ?? str(raw.bank) ?? str(raw.wallet) ?? (cardText || null) ?? str(raw.detail) ?? str(acquirer.bank_transaction_id),
+    amountPaise: num(raw.amount) ?? num(raw.amountPaise),
+    feePaise: num(raw.fee) ?? num(raw.feePaise),
+    error:
+      str(raw.error_description) ?? str(raw.errorDescription) ?? str(rec(raw.error).description) ?? str(raw.error_reason) ?? str(raw.errorReason) ?? str(raw.error),
+    refundStatus: str(raw.refund_status) ?? str(raw.refundStatus),
+    createdAt: when(raw.created_at ?? raw.createdAt),
+  }
+}
+
+function toRazorpayLive(raw: unknown): RazorpayLive | null | undefined {
+  if (raw === undefined) return undefined
+  if (raw === null) return null
+  const r = rec(raw)
+  const order = rec(r.order)
+  const list = r.payments ?? r.attempts ?? rec(r.payments).items ?? r.items
+  const items = Array.isArray(list) ? list : Array.isArray(rec(list).items) ? (rec(list).items as unknown[]) : []
+  return {
+    orderStatus: str(r.orderStatus) ?? str(order.status) ?? str(r.status),
+    amountPaidPaise: num(r.amountPaid) ?? num(r.amount_paid) ?? num(order.amount_paid),
+    payments: items.map((p) => toRazorpayPayment(rec(p))).filter((p) => p.id),
+    fetchError: str(r.error) ?? str(r.fetchError) ?? str(rec(r.error).message),
+  }
+}
+
+/** The payment that counts: captured first, then authorized, else the latest attempt. */
+export function primaryPayment(live: RazorpayLive | null | undefined): RazorpayPayment | null {
+  const payments = live?.payments ?? []
+  return (
+    payments.find((p) => p.status === "captured") ??
+    payments.find((p) => p.status === "authorized") ??
+    [...payments].sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))[0] ??
+    null
+  )
+}
+
 function toStuckOrder(raw: RawRecord): StuckOrder {
+  const live = toRazorpayLive(raw.razorpayLiveStatus)
   const user = rec(raw.user ?? raw.userId)
   const plan = rec(raw.plan ?? raw.planId)
   const createdAt = str(raw.createdAt)
@@ -254,9 +333,14 @@ function toStuckOrder(raw: RawRecord): StuckOrder {
     userMobile: str(user.mobile) ?? str(raw.userMobile),
     userEmail: str(user.email) ?? str(raw.userEmail),
     razorpayOrderId: str(raw.razorpayOrderId),
-    razorpayPaymentId: str(raw.razorpayPaymentId),
+    // Not on the stuck list today (KNOWN gap) — picked up from any likely
+    // field so it shows as soon as the backend adds it.
+    razorpayPaymentId:
+      (live ? (live.payments.find((p) => p.status === "captured")?.id ?? null) : null) ??
+      str(raw.razorpayPaymentId) ?? str(raw.paymentId) ?? str(rec(raw.payment).razorpayPaymentId) ?? str(rec(raw.payment).id) ?? str(rec(raw.razorpay).paymentId),
     createdAt,
     minutesStuck: minutes,
+    live,
   }
 }
 
@@ -415,6 +499,23 @@ export const adminApi = baseApi.injectEndpoints({
       transformResponse: (res: { data: RawRecord }) => res.data,
       invalidatesTags: ["PaymentOps", "Dashboard", "Users", "Audit"],
     }),
+    // Marks a stuck/bad order `rejected` with a reason (kept, not deleted);
+    // idempotent. 409 INVALID_STATE_TRANSITION once it's paid/activated.
+    // Rejected orders drop out of the stuck list, so the page keeps them
+    // (see payment-ops page) to offer Delete.
+    rejectStuckOrder: builder.mutation<RawRecord, { id: string; reason: string }>({
+      query: ({ id, reason }) => ({ url: `/api/v1/admin/payment-ops/orders/${id}/reject`, method: "POST", body: { reason } }),
+      transformResponse: (res: { data: RawRecord }) => res.data,
+      invalidatesTags: ["PaymentOps", "Dashboard", "Audit"],
+    }),
+
+    // Permanent. Only allowed once the order is `rejected` (409
+    // INVALID_STATE_TRANSITION otherwise) — a deliberate second step.
+    deleteRejectedOrder: builder.mutation<{ id: string; deleted: boolean }, string>({
+      query: (id) => ({ url: `/api/v1/admin/payment-ops/orders/${id}`, method: "DELETE" }),
+      transformResponse: (res: { data: { id: string; deleted: boolean } }) => res.data,
+      invalidatesTags: ["PaymentOps", "Audit"],
+    }),
 
     // G8 config — any admin reads; writes are super_admin + ⚠ step-up.
     getConfig: builder.query<ConfigEntry[], void>({
@@ -551,6 +652,8 @@ export const {
   useResolveAbuseReportMutation,
   useGetStuckOrdersQuery,
   useActivateStuckOrderMutation,
+  useRejectStuckOrderMutation,
+  useDeleteRejectedOrderMutation,
   useGetConfigQuery,
   usePutConfigMutation,
   useDeleteConfigMutation,
