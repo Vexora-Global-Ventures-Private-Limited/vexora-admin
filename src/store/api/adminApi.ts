@@ -86,6 +86,29 @@ export type AdminListing = {
   [key: string]: unknown
 }
 
+/**
+ * A queued listing's photo URLs, cover first. The queue payload's photo
+ * field isn't documented, so this reads the likely shapes — `media` /
+ * `photos` / `images` / `mediaUrls`, each either URL strings or objects with
+ * `url` (`secureUrl`, or a full-URL `cloudinaryPublicId` — what the web
+ * saves). `null` = the row has no photo field at all (the API doesn't send
+ * photos), vs `[]` = it does, and there are none.
+ */
+export function listingPhotos(listing: AdminListing): string[] | null {
+  const raw = listing.media ?? listing.photos ?? listing.images ?? listing.mediaUrls
+  if (!Array.isArray(raw)) return null
+  return raw
+    .map((m, i) => {
+      if (typeof m === "string") return { url: m, pos: i }
+      const r = (m ?? {}) as Record<string, unknown>
+      const url = [r.url, r.secureUrl, r.secure_url, r.cloudinaryPublicId].find((v) => typeof v === "string" && v.startsWith("https://"))
+      return { url: url as string | undefined, pos: typeof r.position === "number" ? r.position : i }
+    })
+    .filter((m): m is { url: string; pos: number } => !!m.url)
+    .sort((a, b) => a.pos - b.pos)
+    .map((m) => m.url)
+}
+
 // ── G6 Ads ──────────────────────────────────────────────────────────────────
 export type AdProduct = "banner" | "sponsored" | "featured" | "project_promotion"
 export type AdminAd = {

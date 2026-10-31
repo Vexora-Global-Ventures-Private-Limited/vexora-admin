@@ -1,13 +1,15 @@
 "use client"
 
+import { UserCard } from "@/components/admin/users/user-chip"
 import { use } from "react"
 import { useRouter } from "next/navigation"
 import { StatusPill } from "@/components/admin/status-pill"
 import { DetailBackLink, DetailCard } from "@/components/admin/detail-page-shell"
+import { ListingPhotosCell } from "@/components/admin/moderation/listing-photos-cell"
 import { PendingListingButtons, LiveListingTools, useListingActions } from "@/components/admin/moderation/listing-actions"
-import { Fact, QueryState, ShortId, UserLink, formatDateTime, formatPaise, isObjectId } from "@/components/admin/moderation/shared"
+import { Fact, QueryState, ShortId, formatDateTime, formatPaise, isObjectId } from "@/components/admin/moderation/shared"
 import { listingStatusLabel, listingStatusTone } from "@/lib/listing-status"
-import { useGetListingQueueQuery } from "@/store/api/adminApi"
+import { listingPhotos, useGetListingQueueQuery } from "@/store/api/adminApi"
 import { ROUTES } from "@/lib/routes"
 
 /**
@@ -60,10 +62,20 @@ export default function ListingDetailPage({ params }: { params: Promise<{ id: st
               <Fact label="Purpose" value={listing.purpose === "rent" ? "Rent" : listing.purpose === "sale" ? "Sale" : listing.purpose || "—"} />
               <Fact label="BHK" value={listing.bhk ?? "—"} />
               <Fact label="Area" value={listing.areaSqft ? `${listing.areaSqft.toLocaleString("en-IN")} sq.ft` : "—"} />
-              <Fact label="Seller" value={<UserLink id={listing.sellerId} />} />
               <Fact label="Submitted" value={formatDateTime(listing.submittedAt ?? listing.updatedAt)} />
               <Fact label="Created" value={formatDateTime(listing.createdAt)} />
               <Fact label="Listing id" value={<ShortId id={listing._id} />} />
+            </div>
+
+            <div className="mt-4">
+              <UserCard id={listing.sellerId} role="Seller — who posted this listing" />
+            </div>
+
+            <div className="mt-4">
+              <div className="text-[10px] uppercase tracking-wide text-brand-secondary/50">Photos</div>
+              <div className="mt-1">
+                <ListingPhotosCell title={listing.title || "Listing"} photos={listingPhotos(listing)} size="lg" />
+              </div>
             </div>
 
             {listing.description && (

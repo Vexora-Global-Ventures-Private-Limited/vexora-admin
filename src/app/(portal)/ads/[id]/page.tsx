@@ -1,5 +1,6 @@
 "use client"
 
+import { UserCard } from "@/components/admin/users/user-chip"
 import { use } from "react"
 import { useRouter } from "next/navigation"
 import { Info, ShieldAlert } from "lucide-react"
@@ -15,7 +16,7 @@ import {
   runWindowEnded,
   useAdActions,
 } from "@/components/admin/ads/ad-actions"
-import { Fact, QueryState, ShortId, UserLink, formatDate, formatDateTime, formatPaise } from "@/components/admin/moderation/shared"
+import { Fact, QueryState, ShortId, formatDate, formatDateTime, formatPaise } from "@/components/admin/moderation/shared"
 import { useGetAdPackagesQuery, useGetAdQueueQuery, type AdProduct } from "@/store/api/adminApi"
 import { ROUTES } from "@/lib/routes"
 
@@ -57,7 +58,6 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
             </div>
 
             <div className="mt-5 grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-              <Fact label="Advertiser" value={<UserLink id={ad.ownerId} />} />
               <Fact
                 label={adTarget(ad).label}
                 value={(() => {
@@ -81,6 +81,9 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
               </div>
             )}
 
+            <div className="mt-4">
+              <UserCard id={ad.ownerId} role="Advertiser — who placed this ad" />
+            </div>
             <div className="mt-5">
               <div className="mb-2 text-[10px] uppercase tracking-wide text-brand-secondary/50">Creative</div>
               {ad.creatives && ad.creatives.length > 0 ? (
@@ -93,7 +96,7 @@ export default function AdDetailPage({ params }: { params: Promise<{ id: string 
                 <p className="text-xs text-brand-secondary/55">
                   {ad.product === "sponsored" || ad.product === "featured"
                     ? "This product has no creative — it reuses the listing's / builder profile's own content."
-                    : "No creative attached (the ad queue doesn't always include creatives)."}
+                    : "Image not available — the admin ad API (GET /admin/ads/queue) doesn't include the ad's image yet, so it can't be previewed before approving."}
                 </p>
               )}
             </div>

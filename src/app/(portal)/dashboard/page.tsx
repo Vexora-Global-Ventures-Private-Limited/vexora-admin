@@ -57,6 +57,13 @@ export default function DashboardPage() {
     { label: "Ad approvals", count: dashValue(data, "queues.ads"), href: ROUTES.ads, icon: Megaphone },
     { label: "Abuse reports", count: dashValue(data, "abuse.open"), href: ROUTES.abuse, icon: ShieldAlert },
   ]
+  // "Open queue items" opens the queue that has work waiting: the only one if
+  // just one does, else the busiest; nothing waiting → the queue row below.
+  const busiestQueue = queues.filter((q) => (q.count ?? 0) > 0).sort((a, b) => (b.count ?? 0) - (a.count ?? 0))[0]
+  const openQueueHref = busiestQueue?.href ?? "#queues-heading"
+  const openQueueHint = busiestQueue
+    ? `${queues.filter((q) => (q.count ?? 0) > 0).map((q) => `${formatCount(q.count ?? 0)} ${q.label.toLowerCase()}`).join(" · ")}`
+    : undefined
 
   return (
     <div className="space-y-6">
@@ -82,7 +89,7 @@ export default function DashboardPage() {
           value={dashValue(data, "users.active")}
           icon={Users}
           loading={isLoading}
-          href={ROUTES.users}
+          href={`${ROUTES.users}?status=active`}
         />
         <StatCard
           label="Suspended users"
@@ -92,19 +99,21 @@ export default function DashboardPage() {
           href={`${ROUTES.users}?status=suspended`}
         />
         {/* No link: the Listings screen is the moderation queue (pending only), not live listings. */}
-        <StatCard label="Live listings" value={liveListings} icon={Building} loading={isLoading} />
+        <StatCard label="Live listings" value={liveListings} icon={Building} loading={isLoading} href={ROUTES.listings} />
         <StatCard
           label="MRR"
           value={dashValue(data, "mrr")}
           prefix="₹"
           icon={Wallet}
           loading={isLoading}
+          href={ROUTES.payments}
         />
         <StatCard
           label="Leads (30d)"
           value={dashValue(data, "leads.last30d")}
           icon={TrendingUp}
           loading={isLoading}
+          href={ROUTES.reports}
         />
         <StatCard
           label="Abuse SLA breaches"
@@ -113,7 +122,7 @@ export default function DashboardPage() {
           loading={isLoading}
           href={ROUTES.abuse}
         />
-        <StatCard label="Open queue items" value={queueTotal} icon={ShieldAlert} loading={isLoading} />
+        <StatCard label="Open queue items" value={queueTotal} icon={ShieldAlert} loading={isLoading} href={openQueueHref} hint={openQueueHint} />
       </div>
 
       <section aria-labelledby="queues-heading">
@@ -145,8 +154,6 @@ export default function DashboardPage() {
             </Link>
           ))}
         </div>
-        {/* GET /admin/kyc/queue is still a 501 placeholder, so its count is always 0 today. */}
-        <p className="mt-2 text-[11px] text-brand-muted-foreground">KYC review isn&apos;t live on the backend yet — its count stays 0 until it is.</p>
       </section>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -161,18 +168,23 @@ export default function DashboardPage() {
           ) : Object.keys(listingsByStatus).length === 0 ? (
             <p className="mt-3 text-sm text-brand-muted-foreground">No listings yet.</p>
           ) : (
-            <dl className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
               {Object.entries(listingsByStatus)
                 .sort(([, a], [, b]) => b - a)
                 .map(([status, count]) => (
-                  <div key={status} className="bg-brand-tertiary/40 p-3">
-                    <dt className="text-[10px] uppercase tracking-wide text-brand-secondary/55">
+                  <Link
+                    key={status}
+                    href={ROUTES.listings}
+                    title={status === "pending_review" ? "Open the review queue" : "Listings — review queue and live-listing tools"}
+                    className="block bg-brand-tertiary/40 p-3 transition-colors hover:bg-brand-tertiary/70 hover:ring-1 hover:ring-brand-primary/50"
+                  >
+                    <div className="text-[10px] uppercase tracking-wide text-brand-secondary/55">
                       {LISTING_STATUS_LABEL[status] ?? status}
-                    </dt>
-                    <dd className="mt-1 font-serif text-xl font-bold text-brand-secondary">{formatCount(count)}</dd>
-                  </div>
+                    </div>
+                    <div className="mt-1 font-serif text-xl font-bold text-brand-secondary">{formatCount(count)}</div>
+                  </Link>
                 ))}
-            </dl>
+            </div>
           )}
         </section>
 
@@ -187,16 +199,21 @@ export default function DashboardPage() {
               Not available yet — the backend still marks this figure as pending.
             </p>
           ) : (
-            <dl className="mt-3 grid grid-cols-3 gap-3">
+            <div className="mt-3 grid grid-cols-3 gap-3">
               {(["mercury", "jupiter", "venus"] as const).map((tier) => (
-                <div key={tier} className="bg-brand-tertiary/40 p-3">
-                  <dt className="text-[10px] uppercase tracking-wide text-brand-secondary/55">{TIER_LABEL[tier]}</dt>
-                  <dd className="mt-1 font-serif text-xl font-bold text-brand-secondary">
+                <Link
+                  key={tier}
+                  href={`${ROUTES.users}?tier=${tier}`}
+                  title={`See ${TIER_LABEL[tier]} members`}
+                  className="block bg-brand-tertiary/40 p-3 transition-colors hover:bg-brand-tertiary/70 hover:ring-1 hover:ring-brand-primary/50"
+                >
+                  <div className="text-[10px] uppercase tracking-wide text-brand-secondary/55">{TIER_LABEL[tier]}</div>
+                  <div className="mt-1 font-serif text-xl font-bold text-brand-secondary">
                     {formatCount(byTier[tier] ?? 0)}
-                  </dd>
-                </div>
+                  </div>
+                </Link>
               ))}
-            </dl>
+            </div>
           )}
         </section>
       </div>

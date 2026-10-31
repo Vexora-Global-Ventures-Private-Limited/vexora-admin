@@ -13,7 +13,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DataTable, type DataTableColumn } from "@/components/admin/data-table"
 import { StatusPill } from "@/components/admin/status-pill"
 import { TotpStepUpDialog } from "@/components/admin/totp-step-up-dialog"
-import { QueryState, ShortId, UserLink, errorText, formatDateTime, formatPaise } from "@/components/admin/moderation/shared"
+import Link from "next/link"
+import { QueryState, ShortId, UserLink, errorText, formatDateTime, formatPaise, isObjectId } from "@/components/admin/moderation/shared"
+import { ROUTES } from "@/lib/routes"
 import { useStepUp } from "@/lib/use-step-up"
 import { RejectionDialog } from "@/components/admin/rejection-dialog"
 import { getApiErrorCode } from "@/lib/api-error"
@@ -100,6 +102,45 @@ function disabledReason(o: StuckOrder, action: "activate" | "reject" | "delete")
   return `Not allowed for a ${o.status.replace(/_/g, " ")} order`
 }
 
+const AD_PRODUCT_LABEL: Record<string, string> = {
+  ad_banner: "Home banner ad",
+  ad_sponsored: "Sponsored listing ad",
+  ad_featured: "Featured developer ad",
+  ad_project_promotion: "Project promotion ad",
+}
+
+/** What was bought: the plan for memberships, the ad product for ads, slots/renewals by purpose. */
+function orderLabel(o: StuckOrder): string {
+  if (o.planName || o.planTier) return (o.planName ?? o.planTier) as string
+  if (o.purpose && AD_PRODUCT_LABEL[o.purpose]) return AD_PRODUCT_LABEL[o.purpose]
+  if (o.purpose === "listing_slot_addon") return "Extra listing slots"
+  if (o.purpose === "listing_renewal") return "Listing renewal"
+  return o.purpose ? o.purpose.replace(/_/g, " ") : "—"
+}
+
+/** What activating this order does, in words — memberships, ads and slots differ. */
+function activationCopy(o: StuckOrder): { button: string; toastTitle: string; toastBody: string } {
+  const purpose = o.purpose ?? ""
+  if (purpose.startsWith("ad_"))
+    return {
+      button: "Confirm payment — send ad for approval",
+      toastTitle: "Ad payment confirmed",
+      toastBody: "The ad is now in Ad approval — approve it there to make it live.",
+    }
+  if (purpose === "listing_slot_addon")
+    return { button: "Confirm payment — add slots", toastTitle: "Extra slots added", toastBody: "The member can post more listings now." }
+  if (purpose === "listing_renewal")
+    return { button: "Confirm payment — renew listing", toastTitle: "Listing renewed", toastBody: "The listing is live again with a new expiry date." }
+  if (purpose.startsWith("membership_"))
+    return {
+      button: "Activate membership",
+      toastTitle: "Membership activated",
+      toastBody: "Receipt, referral days and lead release ran exactly as for a webhook payment.",
+    }
+  // Opened by order id — the purpose isn't known here.
+  return { button: "Activate order", toastTitle: "Order activated", toastBody: "It ran exactly as a webhook payment would." }
+}
+
 const isFree = (o: StuckOrder) => o.amountPaise === 0
 const amountLabel = (o: StuckOrder) => (o.amountPaise == null ? "amount not shown" : isFree(o) ? "₹0 (free)" : formatPaise(o.amountPaise))
 
@@ -181,7 +222,8 @@ export default function PaymentOpsPage() {
           if (status === "paid") {
             toast.info("This order was already paid", { description: "The webhook had already activated it — nothing changed." })
           } else {
-            toast.success("Membership activated", { description: "Receipt, referral days and lead release ran exactly as for a webhook payment." })
+            const copy = activationCopy(order)
+            toast.success(copy.toastTitle, { description: copy.toastBody })
           }
         } finally {
           lock.current = false
@@ -286,7 +328,13 @@ export default function PaymentOpsPage() {
       header: "Member",
       render: (o) => (
         <div className="min-w-[170px] max-w-[230px] space-y-0.5 text-xs">
-          <div className={o.userName ? "font-semibold text-brand-secondary" : "italic text-brand-secondary/50"}>{o.userName ?? "No name"}</div>
+          {o.userId && isObjectId(o.userId) ? (
+            <Link href={ROUTES.userDetail(o.userId)} className={o.userName ? "block font-semibold text-brand-secondary hover:underline" : "block italic text-brand-secondary/50 hover:underline"}>
+              {o.userName ?? "No name"}
+            </Link>
+          ) : (
+            <div className={o.userName ? "font-semibold text-brand-secondary" : "italic text-brand-secondary/50"}>{o.userName ?? "No name"}</div>
+          )}
           {o.userMobile && <div className="text-brand-secondary/70">{o.userMobile}</div>}
           {o.userEmail && (
             <div className="truncate text-brand-secondary/55" title={o.userEmail}>
@@ -305,9 +353,12 @@ export default function PaymentOpsPage() {
       render: (o) => (
         <div className="whitespace-nowrap text-xs">
           <div className="font-semibold capitalize text-brand-secondary">
-            {o.planName ?? o.planTier ?? "—"} <span className="font-normal text-brand-secondary/40">·</span> {amountLabel(o)}
+            {orderLabel(o)} <span className="font-normal text-brand-secondary/40">·</span> {amountLabel(o)}
           </div>
-          {o.purpose && <div className="capitalize text-brand-secondary/55">{o.purpose.replace(/^membership_/, "").replace(/_/g, " ")}</div>}
+          {o.purpose && !o.purpose.startsWith("ad_") && (
+            <div className="capitalize text-brand-secondary/55">{o.purpose.replace(/^membership_/, "").replace(/_/g, " ")}</div>
+          )}
+          {o.purpose?.startsWith("ad_") && <div className="text-brand-secondary/55">Ad — goes to Ad approval once activated</div>}
         </div>
       ),
     },
@@ -511,7 +562,7 @@ export default function PaymentOpsPage() {
         title="Reject this order"
         description={
           rejecting
-            ? `${rejecting.userName ?? rejecting.userMobile ?? rejecting.userEmail ?? "This user"} · ${rejecting.planName ?? rejecting.planTier ?? "plan"} · ${amountLabel(rejecting)}. Only reject if Razorpay shows no captured payment — the user won't get the plan.`
+            ? `${rejecting.userName ?? rejecting.userMobile ?? rejecting.userEmail ?? "This user"} · ${orderLabel(rejecting)} · ${amountLabel(rejecting)}. Only reject if Razorpay shows no captured payment — the user won't get the plan.`
             : ""
         }
         reason={rejectReason}
@@ -529,7 +580,7 @@ export default function PaymentOpsPage() {
             <AlertDialogTitle>Delete this order permanently?</AlertDialogTitle>
             <AlertDialogDescription>
               {deleting
-                ? `${deleting.userName ?? deleting.userMobile ?? deleting.userEmail ?? "This user"} · ${deleting.planName ?? deleting.planTier ?? "plan"} · ${amountLabel(deleting)}. `
+                ? `${deleting.userName ?? deleting.userMobile ?? deleting.userEmail ?? "This user"} · ${orderLabel(deleting)} · ${amountLabel(deleting)}. `
                 : ""}
               The rejected order is removed for good — this can&apos;t be undone. Needs your authenticator code.
             </AlertDialogDescription>
@@ -867,7 +918,7 @@ function ActivateDialog({
         <DialogHeader>
           <DialogTitle className="font-serif text-xl">Activate order manually</DialogTitle>
           <DialogDescription className="break-words">
-            {order.userName ?? order.userMobile ?? order.userEmail ?? "This user"} · {order.planName ?? order.planTier ?? "plan"} · {amountLabel(order)}
+            {order.userName ?? order.userMobile ?? order.userEmail ?? "This user"} · {orderLabel(order)} · {amountLabel(order)}
           </DialogDescription>
         </DialogHeader>
         <form
@@ -926,7 +977,7 @@ function ActivateDialog({
           </div>
           <Button type="submit" className="btn-gold w-full gap-1.5" disabled={!canSubmit}>
             {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-            {submitting ? "Activating…" : "Activate membership"}
+            {submitting ? "Activating…" : activationCopy(order).button}
           </Button>
           {!canSubmit && !submitting && (
             <p className="text-center text-[11px] text-brand-secondary/55">{noteError ?? idError}</p>

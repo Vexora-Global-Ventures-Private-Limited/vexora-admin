@@ -1,5 +1,6 @@
 "use client"
 
+import { UserCard, UserChip } from "@/components/admin/users/user-chip"
 import { useEffect, useId, useRef, useState } from "react"
 import { toast } from "sonner"
 import { AlertTriangle, CheckCircle2, ChevronLeft, ChevronRight, Loader2, RotateCcw, X } from "lucide-react"
@@ -11,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DataTable, type DataTableColumn } from "@/components/admin/data-table"
 import { StatusPill } from "@/components/admin/status-pill"
 import { TotpStepUpDialog } from "@/components/admin/totp-step-up-dialog"
-import { QueryState, ShortId, UserLink, errorText, formatDateTime } from "@/components/admin/moderation/shared"
+import { QueryState, ShortId, errorText, formatDateTime } from "@/components/admin/moderation/shared"
 import { useStepUp } from "@/lib/use-step-up"
 import { getApiErrorCode } from "@/lib/api-error"
 import {
@@ -132,7 +133,7 @@ export default function AbusePage() {
           )}
           {r.reportedUserId && (
             <div>
-              User <UserLink id={r.reportedUserId} />
+              User <UserChip id={r.reportedUserId} className="inline-block align-top" />
             </div>
           )}
           {!r.listingId && !r.reportedUserId && <span className="text-brand-secondary/50">—</span>}
@@ -151,7 +152,7 @@ export default function AbusePage() {
         </div>
       ),
     },
-    { key: "reporter", header: "Reporter", render: (r) => <UserLink id={r.reporterId} className="text-brand-secondary/60" /> },
+    { key: "reporter", header: "Reporter", render: (r) => <UserChip id={r.reporterId} className="max-w-[180px]" /> },
     {
       key: "sla",
       header: "SLA due",
