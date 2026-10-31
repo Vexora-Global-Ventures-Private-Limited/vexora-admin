@@ -32,7 +32,15 @@ export type AdminUserRow = {
   status: AdminUserStatus
   createdAt: string
   lastLoginAt?: string | null
+  /** Current ACTIVE membership tier; null = no active membership (Free). */
+  currentTier?: "mercury" | "jupiter" | "venus" | null
+  membershipExpiresAt?: string | null
 }
+/**
+ * filter[tier]: `free` = no active membership at all; `mercury` = the ₹0
+ * Mercury tier is active. Different buckets (backend, 2026-10-31).
+ */
+export type AdminUserTierFilter = "free" | "mercury" | "jupiter" | "venus"
 export type AdminUserDetail = {
   user: {
     id: string
@@ -246,8 +254,14 @@ export type RazorpayPayment = {
   detail: string | null
   amountPaise: number | null
   feePaise: number | null
+  taxPaise: number | null
+  /** errorDescription — the human-readable part of the error chain. */
   error: string | null
+  /** errorCode · errorSource · errorStep · errorReason, when present. */
+  errorDetail: string | null
   refundStatus: string | null
+  /** Bank references (RRN, UPI transaction id…) to trace a payment with the bank. */
+  references: { label: string; value: string }[]
   createdAt: string | null
 }
 
@@ -268,10 +282,27 @@ const rec = (v: unknown): RawRecord => (v && typeof v === "object" ? (v as RawRe
 // Razorpay timestamps are unix seconds; the backend may pass ISO strings.
 const when = (v: unknown) => (typeof v === "number" ? new Date(v * 1000).toISOString() : str(v))
 
-function toRazorpayPayment(raw: RawRecord): RazorpayPayment {
+const ACQUIRER_LABEL: Record<string, string> = {
+  rrn: "RRN",
+  upi_transaction_id: "UPI txn",
+  upiTransactionId: "UPI txn",
+  bank_transaction_id: "Bank txn",
+  bankTransactionId: "Bank txn",
+  auth_code: "Auth code",
+  authCode: "Auth code",
+  arn: "ARN",
+}
+
+function toReferences(raw: unknown): { label: string; value: string }[] {
+  return Object.entries(rec(raw))
+    .map(([k, v]) => ({ label: ACQUIRER_LABEL[k] ?? k.replace(/_/g, " "), value: str(v) ?? (typeof v === "number" ? String(v) : "") }))
+    .filter((r) => r.value)
+}
+
+function toRazorpayPayment(raw: RawRecord, orderAcquirer?: unknown): RazorpayPayment {
   const card = rec(raw.card)
   const upi = rec(raw.upi)
-  const acquirer = rec(raw.acquirer_data ?? raw.acquirerData)
+  const acquirer = rec(raw.acquirerData ?? raw.acquirer_data)
   const cardText = [str(card.network), str(card.last4) ? `•••• ${str(card.last4)}` : null].filter(Boolean).join(" ")
   return {
     id: str(raw.id) ?? str(raw.paymentId) ?? str(raw.razorpayPaymentId) ?? "",
@@ -281,9 +312,20 @@ function toRazorpayPayment(raw: RawRecord): RazorpayPayment {
       str(raw.vpa) ?? str(upi.vpa) ?? str(raw.bank) ?? str(raw.wallet) ?? (cardText || null) ?? str(raw.detail) ?? str(acquirer.bank_transaction_id),
     amountPaise: num(raw.amount) ?? num(raw.amountPaise),
     feePaise: num(raw.fee) ?? num(raw.feePaise),
+    taxPaise: num(raw.tax) ?? num(raw.taxPaise),
     error:
-      str(raw.error_description) ?? str(raw.errorDescription) ?? str(rec(raw.error).description) ?? str(raw.error_reason) ?? str(raw.errorReason) ?? str(raw.error),
-    refundStatus: str(raw.refund_status) ?? str(raw.refundStatus),
+      str(raw.errorDescription) ?? str(raw.error_description) ?? str(rec(raw.error).description) ?? str(raw.errorReason) ?? str(raw.error_reason) ?? str(raw.error),
+    errorDetail:
+      [
+        str(raw.errorCode) ?? str(raw.error_code),
+        str(raw.errorSource) ?? str(raw.error_source),
+        str(raw.errorStep) ?? str(raw.error_step),
+        str(raw.errorReason) ?? str(raw.error_reason),
+      ]
+        .filter(Boolean)
+        .join(" · ") || null,
+    refundStatus: str(raw.refundStatus) ?? str(raw.refund_status),
+    references: toReferences(Object.keys(acquirer).length ? acquirer : orderAcquirer),
     createdAt: when(raw.created_at ?? raw.createdAt),
   }
 }
@@ -298,7 +340,8 @@ function toRazorpayLive(raw: unknown): RazorpayLive | null | undefined {
   return {
     orderStatus: str(r.orderStatus) ?? str(order.status) ?? str(r.status),
     amountPaidPaise: num(r.amountPaid) ?? num(r.amount_paid) ?? num(order.amount_paid),
-    payments: items.map((p) => toRazorpayPayment(rec(p))).filter((p) => p.id),
+    // acquirerData is per payment; accept an order-level one too.
+    payments: items.map((p) => toRazorpayPayment(rec(p), r.acquirerData)).filter((p) => p.id),
     fetchError: str(r.error) ?? str(r.fetchError) ?? str(rec(r.error).message),
   }
 }
@@ -353,11 +396,14 @@ export const adminApi = baseApi.injectEndpoints({
       providesTags: ["Dashboard"],
     }),
 
-    // G2 — offset paging. filter[tier] → 400 NOT_IMPLEMENTED, so it's not exposed.
-    getUsers: builder.query<{ users: AdminUserRow[] } & Paged, { search?: string; status?: AdminUserStatus; page?: number; limit?: number }>({
-      query: ({ search, status, page, limit }) => ({
+    // G2 — offset paging. filter[tier] added by the backend 2026-10-31.
+    getUsers: builder.query<
+      { users: AdminUserRow[] } & Paged,
+      { search?: string; status?: AdminUserStatus; tier?: AdminUserTierFilter; page?: number; limit?: number }
+    >({
+      query: ({ search, status, tier, page, limit }) => ({
         url: "/api/v1/admin/users",
-        params: params({ search, "filter[status]": status, page, limit }),
+        params: params({ search, "filter[status]": status, "filter[tier]": tier, page, limit }),
       }),
       transformResponse: (res: { data: { users: AdminUserRow[] } & Paged }) => res.data,
       providesTags: ["Users"],

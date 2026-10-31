@@ -66,7 +66,7 @@ Every frontend-fixable bug found in the same review (about 180 across two review
 | 34 | `GET /admin/admins` (list admin accounts) | `POST /admin/users/{id}/reset-2fa` needs an **admin** id, but there's no way to list admins. The **Admins** screen (super_admin only) works around it: it resets 2FA for a *pasted* admin id (found on that admin's audit-log entries), behind a typed `RESET` confirmation + step-up, and refuses your own id. A real list would remove the copy-paste step |
 | 35 | `GET /admin/listings/{id}` (any status) | The moderation detail page can only show listings still in the queue; approved / rejected / removed listings can't be opened |
 | 36 | `GET /admin/ads/{id}` (any status) | Same for ads |
-| 37 | User list rows have no name / tier | `GET /admin/users` returns only `_id, email, mobile, status, createdAt, lastLoginAt`; `filter[tier]` returns `NOT_IMPLEMENTED` |
+| 37 | User list rows have no name / ~~tier~~ — **tier part solved 2026-10-31:** rows carry `currentTier` + `membershipExpiresAt`, shown in a Membership column, plus a `filter[tier]` (free / mercury / jupiter / venus) filter. Names are still missing. Was: | `GET /admin/users` returns only `_id, email, mobile, status, createdAt, lastLoginAt`; `filter[tier]` returns `NOT_IMPLEMENTED` |
 | 38 | Analytics / time-series endpoints | The Reports screen can only show today's dashboard counts — no trends |
 | 39 | List live listings for moderation (e.g. `GET /admin/listings?status=live`) | Extend / remove only work on a pasted listing id — there's no way to browse live listings in the admin |
 | 40 | Creatives in the ad queue payload | `GET /admin/ads/queue` rows carry no `creatives`, so a banner can't be reviewed visually before approving |

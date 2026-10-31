@@ -12,12 +12,19 @@ import { StatusPill } from "@/components/admin/status-pill"
 import { UserStatusAction, useCanManageUsers } from "@/components/admin/users/user-status-action"
 import { formatDate, formatDateTime } from "@/components/admin/dashboard/dashboard-utils"
 import { USER_STATUSES, USER_STATUS_LABEL, userLabel, userStatusTone } from "@/components/admin/users/user-utils"
-import { useGetUsersQuery, type AdminUserRow, type AdminUserStatus } from "@/store/api/adminApi"
+import { useGetUsersQuery, type AdminUserRow, type AdminUserStatus, type AdminUserTierFilter } from "@/store/api/adminApi"
 import { getApiErrorMessage } from "@/lib/api-error"
 import { ROUTES } from "@/lib/routes"
 import { parsePage, useSetUrlParams } from "@/components/admin/url-state"
 
 const STATUSES = USER_STATUSES
+const TIERS: AdminUserTierFilter[] = ["free", "mercury", "jupiter", "venus"]
+const TIER_LABEL: Record<AdminUserTierFilter, string> = {
+  free: "Free (no membership)",
+  mercury: "Mercury",
+  jupiter: "Jupiter",
+  venus: "Venus",
+}
 const STATUS_LABEL = USER_STATUS_LABEL
 const PAGE_SIZE = 20
 const SEARCH_MAX = 100
@@ -32,9 +39,10 @@ export default function UsersPage() {
 
 /**
  * G2 — GET /admin/users. Server-side search (email or mobile substring),
- * status filter (the 3 real values only — anything else is a 400) and
- * offset paging, all kept in the URL. No tier filter: the backend answers
- * filter[tier] with 400 NOT_IMPLEMENTED.
+ * status filter (the 3 real values only — anything else is a 400), tier
+ * filter (free / mercury / jupiter / venus — "free" means no active
+ * membership, distinct from the ₹0 Mercury tier) and offset paging, all
+ * kept in the URL. Each row carries currentTier + membershipExpiresAt.
  */
 function UsersList() {
   const searchParams = useSearchParams()
@@ -45,6 +53,8 @@ function UsersList() {
   const qParam = (searchParams.get("q") ?? "").slice(0, SEARCH_MAX)
   const statusParam = searchParams.get("status")
   const status = STATUSES.includes(statusParam as AdminUserStatus) ? (statusParam as AdminUserStatus) : undefined
+  const tierParam = searchParams.get("tier")
+  const tier = TIERS.includes(tierParam as AdminUserTierFilter) ? (tierParam as AdminUserTierFilter) : undefined
   const page = parsePage(searchParams.get("page"))
 
   const [query, setQuery] = useState(qParam)
@@ -69,16 +79,24 @@ function UsersList() {
     // The pager sits under a long table — start the new page from its top.
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
-  const hasFilters = !!(qParam || status)
+  const hasFilters = !!(qParam || status || tier)
 
   const { data, isLoading, isFetching, isError, error, refetch } = useGetUsersQuery({
     search: qParam || undefined,
     status,
+    tier,
     page,
     limit: PAGE_SIZE,
   })
 
   const users = data?.users ?? []
+  // The server should only return rows of the chosen tier. If any row
+  // disagrees, this API build ignores filter[tier] (seen on vex-dev
+  // 2026-10-31: the fields are there, the filter isn't) — say so instead of
+  // presenting an unfiltered list as filtered.
+  const tierFilterIgnored =
+    !!tier &&
+    users.some((u) => u.currentTier !== undefined && (tier === "free" ? !!u.currentTier : u.currentTier !== tier))
   const total = data?.total ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -98,6 +116,21 @@ function UsersList() {
       key: "status",
       header: "Status",
       render: (u) => <StatusPill tone={userStatusTone(u.status)}>{STATUS_LABEL[u.status] ?? u.status}</StatusPill>,
+    },
+    {
+      key: "tier",
+      header: "Membership",
+      render: (u) => {
+        // Older API builds don't send currentTier — show nothing rather than "Free".
+        if (u.currentTier === undefined) return <span className="text-brand-secondary/40">—</span>
+        if (!u.currentTier) return <span className="text-xs text-brand-secondary/55">Free</span>
+        return (
+          <div className="text-xs">
+            <div className="font-semibold capitalize text-brand-secondary">{u.currentTier}</div>
+            {u.membershipExpiresAt && <div className="text-[10px] text-brand-secondary/55">until {formatDate(u.membershipExpiresAt)}</div>}
+          </div>
+        )
+      },
     },
     { key: "joined", header: "Joined", render: (u) => <span className="text-brand-secondary/55">{formatDate(u.createdAt)}</span> },
     { key: "lastLogin", header: "Last sign-in", render: (u) => <span className="text-brand-secondary/55">{formatDateTime(u.lastLoginAt)}</span> },
@@ -136,6 +169,13 @@ function UsersList() {
               onChange: (v) => setParams({ status: v, page: 1 }),
               options: STATUSES.map((s) => ({ label: STATUS_LABEL[s], value: s })),
             },
+            {
+              key: "tier",
+              label: "Membership",
+              value: tier ?? "all",
+              onChange: (v) => setParams({ tier: v, page: 1 }),
+              options: TIERS.map((t) => ({ label: TIER_LABEL[t], value: t })),
+            },
           ]}
         />
         <span className="text-xs text-brand-muted-foreground" aria-live="polite">
@@ -149,13 +189,21 @@ function UsersList() {
             variant="ghost"
             onClick={() => {
               setQuery("")
-              setParams({ q: undefined, status: undefined, page: 1 })
+              setParams({ q: undefined, status: undefined, tier: undefined, page: 1 })
             }}
           >
             Clear filters
           </Button>
         )}
       </div>
+
+      {tierFilterIgnored && (
+        <div role="alert" className="border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <b>The membership filter isn&apos;t applied by this server yet.</b> It returned users of every tier (the total and pages
+          aren&apos;t filtered). The backend says <code>filter[tier]</code> is live on uat; it hasn&apos;t reached this API yet. Rows of
+          other tiers are hidden below, so this page only shows the matches among the {users.length} users it received.
+        </div>
+      )}
 
       {isError ? (
         <div className="border border-red-200 bg-card p-6 text-center text-sm">
@@ -170,7 +218,7 @@ function UsersList() {
           <DataTable
             ariaLabel="Users"
             columns={columns}
-            rows={users}
+            rows={tierFilterIgnored ? users.filter((u) => (tier === "free" ? !u.currentTier : u.currentTier === tier)) : users}
             rowKey={(u) => u._id}
             loading={isLoading}
             // Server-paged: render the whole page the API returned.
@@ -178,7 +226,7 @@ function UsersList() {
             emptyLabel={
               status === "deleted"
                 ? "No deleted users to show — the backend leaves deleted accounts out of the admin list entirely."
-                : qParam || status
+                : qParam || status || tier
                   ? "No users match these filters."
                   : "No users yet."
             }
