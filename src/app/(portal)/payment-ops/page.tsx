@@ -678,6 +678,7 @@ function PaymentAttempts({ live }: { live: RazorpayLive }) {
               <span>· {[p.method, p.detail].filter(Boolean).join(" · ") || "method unknown"}</span>
               <span>· {rupeesOrDash(p.amountPaise)}</span>
               {p.feePaise != null && <span>· fee {formatPaise(p.feePaise)}</span>}
+              {p.taxPaise != null && <span>(tax {formatPaise(p.taxPaise)})</span>}
             </div>
             <div className="font-mono">
               {url ? (
@@ -690,6 +691,12 @@ function PaymentAttempts({ live }: { live: RazorpayLive }) {
               {p.createdAt && <span className="font-sans text-brand-secondary/45"> · {formatDateTime(p.createdAt)}</span>}
             </div>
             {p.error && <div className="text-red-600/80">{p.error}</div>}
+            {p.errorDetail && <div className="font-mono text-red-600/60">{p.errorDetail}</div>}
+            {p.references.length > 0 && (
+              <div className="font-mono text-brand-secondary/55">
+                {p.references.map((r) => `${r.label}: ${r.value}`).join(" · ")}
+              </div>
+            )}
             {p.refundStatus && <div className="text-red-600/80">Refund: {p.refundStatus}</div>}
           </li>
         )
