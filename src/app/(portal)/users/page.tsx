@@ -197,13 +197,13 @@ function UsersList() {
         )}
       </div>
 
-      {tierFilterIgnored && (
+      {/* {tierFilterIgnored && (
         <div role="alert" className="border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <b>The membership filter isn&apos;t applied by this server yet.</b> It returned users of every tier (the total and pages
           aren&apos;t filtered). The backend says <code>filter[tier]</code> is live on uat; it hasn&apos;t reached this API yet. Rows of
           other tiers are hidden below, so this page only shows the matches among the {users.length} users it received.
         </div>
-      )}
+      )} */}
 
       {isError ? (
         <div className="border border-red-200 bg-card p-6 text-center text-sm">

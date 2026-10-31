@@ -1,6 +1,7 @@
 "use client"
 
 import { use } from "react"
+import Link from "next/link"
 import { Mail, Phone, Building2, TrendingUp, Wallet, ShieldAlert, UserRound } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/admin/status-pill"
@@ -213,9 +214,13 @@ export default function UserDetailPage({ params }: { params: Promise<{ id: strin
             <ul className="mt-1 divide-y divide-brand-border/70 text-sm">
               {recentListings.map((l) => (
                 <li key={l._id} className="flex flex-wrap items-center justify-between gap-2 py-2">
-                  <span className="min-w-0 flex-1 truncate font-semibold text-brand-secondary" title={l.title || undefined}>
-                    {l.title || "Untitled listing"}
-                  </span>
+                  <Link
+                    href={ROUTES.listingDetail(l._id)}
+                    className="min-w-0 flex-1 truncate font-semibold text-brand-secondary hover:text-brand-primary-dark hover:underline"
+                    title={l.status === "pending_review" ? "Open to review (photos, approve / reject)" : "Open (extend / remove)"}
+                  >
+                    {l.title || "Untitled listing"} <span className="font-normal text-brand-primary-dark">→</span>
+                  </Link>
                   <span className="text-xs text-brand-secondary/55">
                     {l.city || "—"} · {formatPaise(l.pricePaise)}
                   </span>

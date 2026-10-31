@@ -1,14 +1,16 @@
 "use client"
 
+import { UserCard, UserChip } from "@/components/admin/users/user-chip"
 import Link from "next/link"
 import { RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DataTable, type DataTableColumn } from "@/components/admin/data-table"
 import { StatusPill } from "@/components/admin/status-pill"
 import { PendingListingButtons, LiveListingTools, useListingActions } from "@/components/admin/moderation/listing-actions"
-import { QueryState, UserLink, formatDateTime, formatPaise } from "@/components/admin/moderation/shared"
+import { QueryState, formatDateTime, formatPaise } from "@/components/admin/moderation/shared"
 import { listingStatusLabel, listingStatusTone } from "@/lib/listing-status"
-import { useGetListingQueueQuery, type AdminListing } from "@/store/api/adminApi"
+import { listingPhotos, useGetListingQueueQuery, type AdminListing } from "@/store/api/adminApi"
+import { ListingPhotosCell } from "@/components/admin/moderation/listing-photos-cell"
 import { ROUTES } from "@/lib/routes"
 
 function place(l: AdminListing) {
@@ -45,9 +47,10 @@ export default function ListingsPage() {
         </Link>
       ),
     },
+    { key: "photos", header: "Photos", render: (l) => <ListingPhotosCell title={l.title || "Listing"} photos={listingPhotos(l)} /> },
     { key: "specs", header: "Type", render: (l) => <span className="text-xs text-brand-secondary/70">{specs(l) || "—"}</span> },
     { key: "price", header: "Price", sortable: true, sortValue: (l) => l.pricePaise ?? 0, render: (l) => <span className="font-bold">{formatPaise(l.pricePaise)}</span> },
-    { key: "seller", header: "Seller", render: (l) => <UserLink id={l.sellerId} className="text-brand-secondary/65" /> },
+    { key: "seller", header: "Seller", render: (l) => <UserChip id={l.sellerId} className="max-w-[180px]" /> },
     {
       key: "submittedAt",
       header: "Submitted",

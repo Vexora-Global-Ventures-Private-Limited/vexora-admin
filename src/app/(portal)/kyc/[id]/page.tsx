@@ -1,5 +1,6 @@
 "use client"
 
+import { UserCard } from "@/components/admin/users/user-chip"
 import { use, useState } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
@@ -94,6 +95,8 @@ export default function KycDetailPage({ params }: { params: Promise<{ id: string
                 {submission.tier && <Fact label="Tier" value={<span className="capitalize">{submission.tier}</span>} />}
               </div>
             </DetailCard>
+
+            {submission.userId && <UserCard id={submission.userId} role="Member — who submitted these documents" />}
 
             <DetailCard>
               <h2 className="font-serif text-base font-bold text-brand-secondary">Documents</h2>

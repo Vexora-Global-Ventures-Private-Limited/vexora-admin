@@ -1,5 +1,6 @@
 "use client"
 
+import { UserCard, UserChip } from "@/components/admin/users/user-chip"
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { RotateCcw, ShieldAlert } from "lucide-react"
@@ -18,7 +19,7 @@ import {
   useAdActions,
 } from "@/components/admin/ads/ad-actions"
 import { AdPackagesSection } from "@/components/admin/ads/ad-packages"
-import { QueryState, ShortId, UserLink, formatDate, formatDateTime, formatPaise } from "@/components/admin/moderation/shared"
+import { QueryState, ShortId, formatDate, formatDateTime, formatPaise } from "@/components/admin/moderation/shared"
 import { useGetAdQueueQuery, type AdminAd } from "@/store/api/adminApi"
 import { ROUTES } from "@/lib/routes"
 
@@ -63,7 +64,7 @@ export default function AdsPage() {
         )
       },
     },
-    { key: "owner", header: "Advertiser", render: (a) => <UserLink id={a.ownerId} className="text-brand-secondary/65" /> },
+    { key: "owner", header: "Advertiser", render: (a) => <UserChip id={a.ownerId} className="max-w-[180px]" /> },
     { key: "amount", header: "Amount", sortable: true, sortValue: (a) => a.amountPaise ?? 0, render: (a) => <span className="font-bold">{formatPaise(a.amountPaise)}</span> },
     {
       key: "run",

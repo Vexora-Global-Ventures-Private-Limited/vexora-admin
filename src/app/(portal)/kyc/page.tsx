@@ -25,7 +25,13 @@ export default function KycPage() {
       header: "Member",
       render: (s) => (
         <div className="space-y-0.5 text-xs">
-          <div className="font-semibold text-brand-secondary">{s.userName ?? "No name"}</div>
+          {s.userId ? (
+            <Link href={ROUTES.userDetail(s.userId)} className="block font-semibold text-brand-secondary hover:underline">
+              {s.userName ?? "No name"}
+            </Link>
+          ) : (
+            <div className="font-semibold text-brand-secondary">{s.userName ?? "No name"}</div>
+          )}
           {s.userMobile && <div className="text-brand-secondary/60">{s.userMobile}</div>}
           {s.userId && <UserLink id={s.userId} className="text-brand-secondary/50" />}
         </div>
