@@ -35,6 +35,8 @@ type DataTableProps<T> = {
   loading?: boolean
   /** Accessible name for the table. */
   ariaLabel?: string
+  /** Extra classes per row (e.g. tint rows in a particular state). */
+  rowClassName?: (row: T) => string | undefined
 }
 
 export function DataTable<T>({
@@ -48,6 +50,7 @@ export function DataTable<T>({
   defaultSortDirection = "asc",
   loading,
   ariaLabel,
+  rowClassName,
 }: DataTableProps<T>) {
   const [sortKey, setSortKey] = useState<string | undefined>(defaultSortKey)
   const [sortDirection, setSortDirection] = useState<SortDirection>(defaultSortDirection)
@@ -140,7 +143,7 @@ export function DataTable<T>({
           {pageRows.map((row) => (
             <TableRow
               key={rowKey(row)}
-              className={cn("border-brand-border/70", onRowClick && "cursor-pointer hover:bg-brand-tertiary/50")}
+              className={cn("border-brand-border/70", onRowClick && "cursor-pointer hover:bg-brand-tertiary/50", rowClassName?.(row))}
               // Ignore clicks that started on a link/button/input inside the row —
               // e.g. a row action button would otherwise also open the row.
               onClick={(e) => {

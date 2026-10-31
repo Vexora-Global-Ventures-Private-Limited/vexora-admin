@@ -19,11 +19,11 @@ Every frontend-fixable bug found in the same review (about 180 across two review
 
 | # | Endpoint | Screen affected | Note |
 |---|---|---|---|
-| 1 | `GET /admin/kyc/queue` | KYC & badges | "G5 KYC review is built in Stage 13" — not deployed on dev (the consumer KYC endpoints are missing too) |
-| 2 | `GET /admin/badges/queues` | KYC & badges | Same — Stage 13 |
+| 1 | ~~`GET /admin/kyc/queue`~~ | KYC & badges | **Solved 2026-10-31:** live; KYC page lists the queue, review page shows documents with Approve / Reject (super_admin or moderator). Row shape undocumented — normalised defensively, untested with a real submission. Was: | "G5 KYC review is built in Stage 13" — not deployed on dev (the consumer KYC endpoints are missing too) |
+| 2 | ~~`GET /admin/badges/queues`~~ | KYC & badges | **Solved 2026-10-31:** removed from the API by design (badges are only granted through KYC approval). Badge revoke (`POST /admin/badges/{userId}/revoke`, super_admin + step-up) is on the user page. Was: | Same — Stage 13 |
 | 3 | ~~`GET /admin/payment-ops/stuck`~~ | Payment ops | **Solved 2026-10-27:** live on vex-dev; wired into the Payment ops page |
 | 4 | ~~`POST /admin/payment-ops/orders/{id}/activate`~~ | Payment ops | **Solved 2026-10-27:** live on vex-dev (step-up, audited, idempotent); Activate dialog on the Payment ops page |
-| 5 | `GET /admin/payments`, `POST /admin/payments/{id}/refund-note` | Payments | "G10 payment log is built in Stage 9" |
+| 5 | `GET /admin/payments`, `POST /admin/payments/{id}/refund-note` | Payments | **2026-10-31:** `GET /admin/payments` dropped from the API spec — the Payments page no longer calls it and says the log isn't available. Payment ops now also has **Reject** (`POST …/orders/{id}/reject`); **Delete** wired too (rejected orders are kept in the admin's browser, since no API lists them). Was: | "G10 payment log is built in Stage 9" |
 
 ## B. Backend bugs & validation gaps
 
@@ -52,6 +52,7 @@ Every frontend-fixable bug found in the same review (about 180 across two review
 | 26 | Membership-plan versioning doesn't match the docs: they say price/duration/quota edits create a new version, but on dev a past price edit stayed on the same id at `version: 1` | Confirm the intended behaviour; if a new version is created, deactivate the old one |
 | 27 | `POST /admin/locations` takes no `activation`, and the default for a new location is undocumented | Accept `activation` on create, or document the default |
 | 28 | Amenity `category` can't be cleared once set | Accept `category: null` on `PATCH` |
+| 29 | ~~Payment ops can't show the Razorpay **payment id or live payment status**~~ — **solved 2026-10-31:** `vex-latest.json` adds `razorpayLiveStatus` to each stuck order; the page shows a Paid / Not paid / Failed / Authorized / Refunded tag, the captured payment id (pre-filled in Activate), method + bank/UPI, and every attempt (error, fee, refund). Shape only described in prose — normalised defensively, unverified against a real response. Was:29 | Payment ops can't show the Razorpay **payment id or live payment status**: `GET /admin/payment-ops/stuck` rows have no `razorpayPaymentId` (even after verify), and reading status from Razorpay needs the key secret (backend only). The page links each real order to its Razorpay dashboard page meanwhile (2026-10-31) | Return `razorpayPaymentId` + `razorpayStatus` (captured / failed / authorized, via `razorpay.orders.fetchPayments`) on each stuck row |
 | 29 | **No admin logout endpoint** (`POST /admin/auth/logout` → 404) — "Sign out" only clears the browser; the 8-hour token stays valid server-side until it expires | A logout / token-revocation endpoint |
 | 30 | **Admin token is stored in `localStorage`** (readable by any script that runs on the page) because the backend only returns it in the JSON body | An httpOnly, Secure, SameSite cookie session for the admin API |
 | 31 | No rate limiting observed on `POST /admin/auth/login` or `/admin/auth/totp/verify` — repeated wrong passwords / codes never returned `429` | Confirm or enable the limiter on vex-dev (brute-force protection) |
